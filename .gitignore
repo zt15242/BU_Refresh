@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+dist/
+build/
+*.db
+olympus/
+.pytest_cache/

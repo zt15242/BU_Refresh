@@ -1,0 +1,2237 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salesforce SOAP 登录与数据刷新工具</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        }
+    </script>
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap');
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        }
+        .font-mono {
+            font-family: 'Fira Code', monospace;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .dark .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        /* Custom scrollbar for terminal */
+        .terminal-scroll::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal-scroll::-webkit-scrollbar-track {
+            background: #090d16;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 4px;
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb:hover {
+            background: #334155;
+        }
+        /* Running task highlight and glow animation */
+        @keyframes shimmers {
+            0% {
+                background-position: -200% 0;
+            }
+            100% {
+                background-position: 200% 0;
+            }
+        }
+        .running-row {
+            position: relative;
+            background-color: rgba(99, 102, 241, 0.08) !important;
+            transition: all 0.3s ease;
+        }
+        .dark .running-row {
+            background-color: rgba(99, 102, 241, 0.18) !important;
+        }
+        .running-row td {
+            border-top: 1px solid rgba(99, 102, 241, 0.4) !important;
+            border-bottom: 1px solid rgba(99, 102, 241, 0.4) !important;
+        }
+        .running-row td:first-child {
+            border-left: 4px solid #6366f1 !important;
+            box-shadow: inset 4px 0 8px -2px rgba(99, 102, 241, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 via-slate-100 to-indigo-50 dark:from-slate-900 dark:via-slate-950 dark:to-slate-900 min-h-screen flex flex-col justify-between transition-colors duration-200">
+
+    <!-- Theme Toggle Floating Button for Login Screen Only -->
+    <div id="themeToggleFloatingContainer" class="fixed top-4 right-4 z-50 flex space-x-2">
+        <button onclick="toggleTheme()" class="p-2.5 rounded-full bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 shadow-md border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition" title="切换主题">
+            <i id="themeToggleIcon" class="fa-solid fa-moon text-lg"></i>
+        </button>
+    </div>
+
+    <!-- ==================== LOGIN VIEW ==================== -->
+    <div id="loginView" class="flex-grow flex flex-col justify-between">
+        <!-- Login Header -->
+        <header class="w-full py-4 px-6 bg-white dark:bg-slate-900 shadow-sm border-b border-slate-200 dark:border-slate-800 transition-colors duration-200">
+            <div class="max-w-6xl mx-auto flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-blue-600 text-white p-2 rounded-lg shadow-md shadow-blue-500/20">
+                        <i class="fa-solid fa-cloud-bolt text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-bold text-slate-800 dark:text-white tracking-tight">SFDC SOAP 登录工具</h1>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Salesforce Soap Web Services Utility</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full font-medium">
+                    <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                    <span>本地服务运行中</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Login Form Container -->
+        <main class="flex-grow flex items-center justify-center p-6 my-4">
+            <div class="w-full max-w-md glass-panel rounded-2xl p-8 shadow-xl shadow-slate-200/50 dark:shadow-none">
+                <h2 class="text-2xl font-bold text-slate-800 dark:text-white mb-2 text-center">系统登录</h2>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mb-6 text-center">使用 SFDC SOAP 接口进行鉴权以访问工作台</p>
+
+                <!-- Error Alert (Hidden by default) -->
+                <div id="loginErrorAlert" class="hidden mb-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-xl p-4 text-left">
+                    <div class="flex items-start space-x-2.5">
+                        <i class="fa-solid fa-circle-exclamation text-red-600 dark:text-red-400 mt-0.5"></i>
+                        <div>
+                            <h4 class="font-bold text-red-800 dark:text-red-200 text-xs">登录失败</h4>
+                            <p id="loginErrorMessage" class="text-xs text-red-600 dark:text-red-300 mt-1 break-all"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <form id="loginForm" class="space-y-5">
+                    <!-- Environment -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">选择环境</label>
+                        <div class="grid grid-cols-2 gap-3">
+                            <label class="relative flex items-center justify-center p-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-all [&:has(input:checked)]:border-blue-600 [&:has(input:checked)]:bg-blue-50/50 [&:has(input:checked)]:dark:border-blue-500 [&:has(input:checked)]:dark:bg-blue-950/20">
+                                <input type="radio" name="env" value="sandbox" checked class="sr-only">
+                                <div class="text-center">
+                                    <div class="font-semibold text-sm text-slate-700 dark:text-slate-300">沙箱环境 (Sandbox)</div>
+                                    <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">test.sfcrmproducts.cn</div>
+                                </div>
+                            </label>
+                            <label class="relative flex items-center justify-center p-3 rounded-xl border-2 border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-all [&:has(input:checked)]:border-blue-600 [&:has(input:checked)]:bg-blue-50/50 [&:has(input:checked)]:dark:border-blue-500 [&:has(input:checked)]:dark:bg-blue-950/20">
+                                <input type="radio" name="env" value="production" class="sr-only">
+                                <div class="text-center">
+                                    <div class="font-semibold text-sm text-slate-700 dark:text-slate-300">生产环境 (Production)</div>
+                                    <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">login.sfcrmproducts.cn</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Username -->
+                    <div>
+                        <label for="username" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">用户名 (Username)</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                                <i class="fa-regular fa-user"></i>
+                            </span>
+                            <input type="text" id="username" required
+                                class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 transition"
+                                placeholder="name@company.com">
+                        </div>
+                    </div>
+
+                    <!-- Password -->
+                    <div>
+                        <label for="password" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">密码 (Password)</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                                <i class="fa-solid fa-lock"></i>
+                            </span>
+                            <input type="password" id="password" required
+                                class="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 transition"
+                                placeholder="••••••••">
+                            <button type="button" onclick="togglePasswordVisibility()" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600">
+                                <i id="passwordToggleIcon" class="fa-regular fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Security Token -->
+                    <div>
+                        <label for="securityToken" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">
+                            安全 Token (Security Token)
+                            <span class="text-slate-400 font-normal lowercase">(可选)</span>
+                        </label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                                <i class="fa-solid fa-key"></i>
+                            </span>
+                            <input type="text" id="securityToken"
+                                class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 transition"
+                                placeholder="若环境有 IP 限制，可能需要提供">
+                        </div>
+                    </div>
+
+                    <!-- Remember Password Checkbox -->
+                    <div class="flex items-center">
+                        <input type="checkbox" id="rememberMe" class="w-4 h-4 rounded border-slate-350 dark:border-slate-700 bg-white dark:bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-white dark:focus:ring-offset-slate-900 cursor-pointer">
+                        <label for="rememberMe" class="ml-2 text-xs font-semibold text-slate-600 dark:text-slate-400 cursor-pointer select-none">记住密码</label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" id="submitBtn"
+                        class="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-lg shadow-blue-600/10 hover:shadow-blue-600/20 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition flex items-center justify-center space-x-2">
+                        <span id="btnText">立即登录</span>
+                        <div id="btnSpinner" class="hidden w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    </button>
+                </form>
+            </div>
+        </main>
+
+        <!-- Login Footer -->
+        <footer class="w-full py-4 text-center border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-colors duration-200">
+            <p class="text-xs text-slate-400 dark:text-slate-500">&copy; 2026 SFDC SOAP Login Utility. All rights reserved.</p>
+        </footer>
+    </div>
+
+
+    <!-- ==================== WORKSPACE VIEW (HIDDEN BY DEFAULT) ==================== -->
+    <div id="workspaceView" class="hidden min-h-screen flex flex-row w-full bg-slate-50 dark:bg-slate-950 transition-colors duration-200">
+        
+        <!-- Left Sidebar -->
+        <aside class="w-64 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 flex flex-col border-r border-slate-200 dark:border-slate-800 shadow-md shrink-0 transition-colors duration-200">
+            <!-- Sidebar Header -->
+            <div class="p-6 border-b border-slate-200 dark:border-slate-800 flex items-center space-x-3">
+                <div class="bg-indigo-600 text-white p-2 rounded-lg shadow-md shadow-indigo-600/20">
+                    <i class="fa-solid fa-screwdriver-wrench text-lg"></i>
+                </div>
+                <div>
+                    <h2 class="text-sm font-bold text-slate-800 dark:text-white tracking-wider uppercase">BU控制台</h2>
+                    <p class="text-[10px] text-slate-400 dark:text-slate-550">刷新与同步管理</p>
+                </div>
+            </div>
+
+            <!-- Navigation Links -->
+            <nav class="flex-grow p-4 space-y-1">
+                <!-- Operation Config Tab -->
+                <button onclick="switchTab('operations')" id="tabBtn-operations"
+                    class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium text-white bg-indigo-600 shadow-md shadow-indigo-600/10">
+                    <i class="fa-solid fa-sliders text-lg"></i>
+                    <span>操作配置</span>
+                </button>
+                <!-- Logs Tab -->
+                <button onclick="switchTab('logs')" id="tabBtn-logs"
+                    class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400">
+                    <i class="fa-solid fa-list-check text-lg"></i>
+                    <span>执行日志</span>
+                </button>
+                <!-- Backup Tab -->
+                <button onclick="switchTab('backup')" id="tabBtn-backup"
+                    class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400">
+                    <i class="fa-solid fa-database text-lg"></i>
+                    <span>备份管理</span>
+                </button>
+                <!-- Database Tab -->
+                <button onclick="switchTab('database')" id="tabBtn-database"
+                    class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400">
+                    <i class="fa-solid fa-table text-lg"></i>
+                    <span>数据库管理</span>
+                </button>
+            </nav>
+
+            <!-- Connected User Card in Sidebar Bottom -->
+            <div class="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
+                <div class="flex items-center space-x-3">
+                    <div id="userAvatarCircle" class="w-10 h-10 bg-indigo-500 text-white rounded-full flex items-center justify-center font-bold text-sm shadow shadow-indigo-500/20">
+                        U
+                    </div>
+                    <div class="flex-grow min-w-0">
+                        <div id="userDisplayName" class="text-xs font-semibold text-slate-800 dark:text-white truncate">用户姓名</div>
+                        <div id="userDisplayEmail" class="text-[10px] text-slate-400 dark:text-slate-550 truncate">user@company.com</div>
+                    </div>
+                    <button onclick="logout()" title="安全退出" class="text-slate-400 hover:text-red-500 transition p-1">
+                        <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Right Main Panel -->
+        <main class="flex-grow flex flex-col bg-slate-50 dark:bg-slate-950 overflow-hidden relative transition-colors duration-200">
+            <!-- Main Top Navbar -->
+            <header class="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 flex items-center justify-between shrink-0 transition-colors duration-200">
+                <div class="flex items-center space-x-3">
+                    <!-- Text box showing contents node, mimicking "2026.06.15 内容点" -->
+                    <div class="flex items-center space-x-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-lg text-slate-800 dark:text-slate-200">
+                        <i class="fa-regular fa-calendar text-slate-500 dark:text-slate-400 text-xs"></i>
+                        <input type="text" id="nodeNameInput" value="2026.06.15 内容点" 
+                            class="bg-transparent text-sm font-semibold text-slate-800 dark:text-slate-200 focus:outline-none w-44 font-mono focus:border-indigo-500 border-b border-transparent">
+                    </div>
+                    <span class="text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2.5 py-1 rounded-md font-medium">配置节点</span>
+                </div>
+
+                <!-- API Server Info Badge -->
+                <div class="flex items-center space-x-4">
+                    <div class="text-right">
+                        <span class="text-[10px] text-slate-400 dark:text-slate-505 block">连接终端 (Instance)</span>
+                        <span id="headerServerUrl" class="text-xs font-mono text-slate-600 dark:text-slate-300 truncate max-w-xs block">https://test.sfcrmproducts.cn</span>
+                    </div>
+                    <div class="w-1.5 h-10 bg-slate-200 dark:bg-slate-800 rounded-full"></div>
+                    <!-- Settings/Session indicator -->
+                    <button onclick="toggleSessionModal()" class="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition p-2 bg-slate-100 dark:bg-slate-800 rounded-lg" title="查看 Session ID 凭证">
+                        <i class="fa-solid fa-key"></i>
+                    </button>
+                    <!-- Theme Toggle button integrated into workspace header instead of absolute floating -->
+                    <button onclick="toggleTheme()" class="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white transition p-2 bg-slate-100 dark:bg-slate-800 rounded-lg" title="切换主题">
+                        <i id="themeToggleIconWorkspace" class="fa-solid fa-moon"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Inner Content Area -->
+            <div class="flex-grow p-8 overflow-y-auto flex flex-col space-y-6">
+
+                <!-- ==================== TAB CONTENT: OPERATIONS ==================== -->
+                <div id="tabContent-operations" class="flex flex-col space-y-6">
+                    
+                    <!-- ============ 1. OPERATIONS: LIST VIEW ============ -->
+                    <div id="operationsListView" class="flex flex-col space-y-4">
+                        <!-- Header banner (No New button) -->
+                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm flex items-center justify-between transition-colors duration-200">
+                            <div class="flex items-center space-x-3.5">
+                                <div class="bg-[#a094ed] text-white p-3 rounded-lg shadow-md flex items-center justify-center w-11 h-11">
+                                    <i class="fa-solid fa-folder-open text-lg"></i>
+                                </div>
+                                <div>
+                                    <h2 class="text-base font-bold text-slate-800 dark:text-white">BU 刷新配置列表</h2>
+                                    <p class="text-xs text-slate-500 dark:text-slate-450 mt-0.5">请选择任意一个主数据刷新配置项以管理和执行同步子任务</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Grid Table for List of configs -->
+                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden transition-colors duration-200">
+                            <div class="px-6 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between text-xs text-slate-550 dark:text-slate-400">
+                                <span>3 个项目 • 排序依 BU 刷新配置名称 • 刚刚更新</span>
+                                <i onclick="loadRefreshConfigs(true)" class="fa-solid fa-rotate-right cursor-pointer hover:text-slate-700 dark:hover:text-white transition" title="从 Salesforce 获取最新数据"></i>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse text-xs">
+                                    <thead>
+                                        <tr class="bg-slate-50 dark:bg-slate-900/40 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
+                                            <th class="px-6 py-3.5">BU 刷新配置名称</th>
+                                            <th class="px-6 py-3.5">行政省</th>
+                                            <th class="px-6 py-3.5">市</th>
+                                            <th class="px-6 py-3.5">当前进度</th>
+                                            <th class="px-6 py-3.5">所有人</th>
+                                            <th class="px-6 py-3.5">创建时间</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-150 dark:divide-slate-800/60" id="masterRecordsListBody">
+                                        <!-- Rendered dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ============ 2. OPERATIONS: DETAIL VIEW (HIDDEN BY DEFAULT) ============ -->
+                    <div id="operationsDetailView" class="hidden flex flex-col space-y-6">
+                        
+                        <!-- Breadcrumbs -->
+                        <div class="flex items-center space-x-1.5 text-xs text-slate-400 dark:text-slate-500">
+                            <a href="#" onclick="showOperationsList()" class="hover:underline text-indigo-500 font-semibold flex items-center space-x-1">
+                                <i class="fa-solid fa-arrow-left text-[10px] mr-1"></i>返回列表
+                            </a>
+                            <span>/</span>
+                            <span id="breadcrumbRecordName" class="font-mono">BU-2026-06-17-0001</span>
+                        </div>
+
+                        <!-- Salesforce-style Record Header Panel -->
+                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm transition-colors duration-200 flex flex-col md:flex-row md:items-center justify-between space-y-4 md:space-y-0">
+                            <div class="flex items-center space-x-4">
+                                <!-- Salesforce Purple Book Icon representing BU Refresh Config -->
+                                <div class="bg-[#a094ed] text-white p-3 rounded-lg shadow-md flex items-center justify-center w-12 h-12">
+                                    <i class="fa-solid fa-book-open text-xl"></i>
+                                </div>
+                                <div>
+                                    <div class="text-[10px] font-semibold text-slate-400 dark:text-slate-505 tracking-wider uppercase">BU 刷新配置</div>
+                                    <h2 class="text-lg font-bold text-slate-800 dark:text-white mt-0.5" id="detailRecordName">BU-2026-06-17-0001</h2>
+                                </div>
+                            </div>
+                            
+                            <!-- Actions button toolbar, keeping only the run refresh button -->
+                            <div class="flex items-center space-x-1.5 flex-wrap">
+                                <!-- Primary Run Button -->
+                                <button onclick="runRefreshProcess()" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 mr-2">
+                                    <i class="fa-solid fa-play"></i>
+                                    <span>开始备份处理</span>
+                                </button>
+                                <!-- Start Refresh Button -->
+                                <button onclick="runDataRefreshProcess()" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-emerald-600/10 hover:shadow-emerald-600/20">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                    <span>开始刷新数据</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Nested Sub-tasks (Objects) Table - mimicking Salesforce Related Lists -->
+                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm transition-colors duration-200 overflow-hidden">
+                            <!-- Related List Header -->
+                            <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between">
+                                <h3 class="text-sm font-bold text-slate-850 dark:text-white flex items-center space-x-2">
+                                    <i class="fa-solid fa-list-check text-indigo-500"></i>
+                                    <span>根据主数据拆分的子任务 (子任务即对象)</span>
+                                </h3>
+                                <span class="text-xs bg-slate-100 dark:bg-slate-855 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-mono font-medium">3 项相关记录</span>
+                            </div>
+                            
+                            <!-- Nested Table -->
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse text-xs">
+                                    <thead>
+                                        <tr class="bg-slate-50 dark:bg-slate-900/40 border-b border-slate-200 dark:border-slate-800 text-slate-450 dark:text-slate-500 uppercase tracking-wider font-semibold">
+                                            <th class="px-6 py-3.5 w-1/4">子任务名称</th>
+                                            <th class="px-6 py-3.5 w-1/6">拆分数据量</th>
+                                            <th class="px-6 py-3.5 w-1/6">是否备份完成</th>
+                                            <th class="px-6 py-3.5 w-1/6 text-center">是否执行</th>
+                                            <th class="px-6 py-3.5 w-1/4 text-center">操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-150 dark:divide-slate-800/60" id="detailSubtasksTableBody">
+                                        <!-- Rendered dynamically from selected record tasksConfig -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== TAB CONTENT: LOGS ==================== -->
+                <div id="tabContent-logs" class="hidden flex flex-col flex-grow h-[calc(100vh-170px)]">
+                    
+                    <!-- Terminal-style Log console only -->
+                    <div class="flex-grow flex flex-col h-full bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+                        <!-- Console Header with Actions integrated -->
+                        <div class="bg-slate-950 px-4 py-3 border-b border-slate-800 flex items-center justify-between shrink-0">
+                            <div class="flex items-center space-x-2">
+                                <div class="flex space-x-1.5">
+                                    <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+                                    <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                                    <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+                                </div>
+                                <span class="text-xs font-semibold text-slate-400 font-mono pl-2">Console Terminal Logs</span>
+                            </div>
+                            <div class="flex items-center space-x-3 text-xs font-mono">
+                                <!-- Integrated clean action buttons -->
+                                <button onclick="simulateMockRefresh()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[10px] font-semibold transition flex items-center space-x-1">
+                                    <i class="fa-solid fa-rotate text-[8px]"></i>
+                                    <span>模拟刷新</span>
+                                </button>
+                                <button onclick="clearLogs()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-350 border border-slate-700 rounded text-[10px] font-semibold transition flex items-center space-x-1">
+                                    <i class="fa-solid fa-trash-can text-[8px]"></i>
+                                    <span>清除日志</span>
+                                </button>
+                                <span class="text-[10px] text-slate-550 border-l border-slate-800 pl-3">UTF-8 | bash</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Console Output -->
+                        <div id="terminalBody" class="flex-grow p-4 font-mono text-xs text-slate-300 overflow-y-auto terminal-scroll bg-[#090d16] space-y-1.5 select-text h-full">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- ==================== TAB CONTENT: BACKUP ==================== -->
+                <div id="tabContent-backup" class="hidden flex flex-col space-y-6">
+                    
+                    <!-- Tree view of local backup files (Full width) -->
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm transition-colors duration-200 flex flex-col space-y-4">
+                        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
+                            <h3 class="text-base font-bold text-slate-800 dark:text-white flex items-center space-x-2">
+                                <i class="fa-solid fa-folder-tree text-indigo-500"></i>
+                                <span>本地备份目录树</span>
+                            </h3>
+                            <button onclick="loadBackupTree()" class="text-xs text-indigo-500 hover:text-indigo-600 transition flex items-center space-x-1" title="刷新文件树">
+                                <i class="fa-solid fa-arrows-rotate mr-0.5"></i>
+                                <span>刷新</span>
+                            </button>
+                        </div>
+                        <p class="text-xs text-slate-505 dark:text-slate-400">本地备份存放根路径: <span class="font-mono text-indigo-600 dark:text-indigo-400 font-semibold">olympus/</span></p>
+
+                        <!-- Tree view container -->
+                        <div class="border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 rounded-xl p-4 font-mono text-xs text-slate-700 dark:text-slate-350 min-h-[400px] max-h-[600px] overflow-y-auto" id="backupTreeContainer">
+                            <!-- Populated dynamically via loadBackupTree() -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ==================== TAB CONTENT: DATABASE ==================== -->
+                <div id="tabContent-database" class="hidden flex flex-col space-y-6">
+                    <!-- SQLite Database Viewer (Full width, read-only) -->
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm transition-colors duration-200 flex flex-col space-y-4">
+                        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
+                            <h3 class="text-base font-bold text-slate-800 dark:text-white flex items-center space-x-2">
+                                <i class="fa-solid fa-database text-indigo-500"></i>
+                                <span>本地 SQLite 数据库浏览器（只读）</span>
+                            </h3>
+                            <div class="flex items-center space-x-3">
+                                <!-- Select Table Dropdown -->
+                                <select id="dbTableSelector" onchange="loadDbTableData()" class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-350 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer">
+                                    <option value="">-- 选择数据库表 --</option>
+                                </select>
+                                <button onclick="loadDbTables()" class="text-xs text-indigo-500 hover:text-indigo-600 transition flex items-center space-x-1" title="刷新表格列表">
+                                    <i class="fa-solid fa-arrows-rotate mr-0.5"></i>
+                                    <span>刷新</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <p class="text-xs text-slate-500 dark:text-slate-400">本地数据库: <span class="font-mono text-indigo-600 dark:text-indigo-400 font-semibold">sfdc_workspace.db</span> (提供缓存及记录跟踪存储)。</p>
+                        
+                        <!-- Search & Data Area -->
+                        <div id="dbViewerSection" class="hidden flex flex-col space-y-3">
+                            <!-- Search Table Rows -->
+                            <div class="relative w-64 self-end">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                                    <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                                </span>
+                                <input type="text" id="dbViewerSearch" oninput="filterDbTableData()" placeholder="在表中搜索..." class="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-350 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            </div>
+                            
+                            <!-- Table Grid -->
+                            <div class="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-sm max-h-[500px]">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr id="dbViewerTableHeader" class="bg-slate-50 dark:bg-slate-850/50 text-slate-650 dark:text-slate-300 text-xs font-bold border-b border-slate-200 dark:border-slate-800">
+                                            <!-- Headers -->
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dbViewerTableBody" class="text-xs text-slate-700 dark:text-slate-300 divide-y divide-slate-200 dark:divide-slate-800/60">
+                                        <!-- Data rows -->
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- Footer status info -->
+                            <div class="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 pt-1">
+                                <div>
+                                    共计 <span id="dbViewerTotalRows" class="font-bold text-slate-650 dark:text-slate-300">0</span> 行数据
+                                </div>
+                                <div>
+                                    显示范围: 1 - <span id="dbViewerVisibleRows" class="font-bold text-slate-650 dark:text-slate-300">0</span> 行
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Empty state placeholder -->
+                        <div id="dbViewerPlaceholder" class="flex flex-col items-center justify-center py-12 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-950/20 text-slate-400 dark:text-slate-500">
+                            <i class="fa-solid fa-table text-4xl mb-3 text-slate-300 dark:text-slate-700"></i>
+                            <p class="text-xs">请在上方下拉框选择要浏览的 SQLite 数据库表</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+
+    <!-- ==================== DIALOGS / MODALS ==================== -->
+    <!-- Session Credentials Modal -->
+    <div id="sessionModal" class="hidden fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-2xl rounded-2xl p-6 shadow-2xl flex flex-col space-y-4 transition-colors duration-200">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-slate-800 dark:text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-shield-halved text-indigo-500"></i>
+                    <span>当前登录 Session 信息凭证</span>
+                </h3>
+                <button onclick="toggleSessionModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-white transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <!-- Session ID -->
+                <div>
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Session ID (Access Token)</label>
+                        <button onclick="copyToClipboard('workspaceSessionId')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center space-x-1 font-medium transition">
+                            <i class="fa-regular fa-copy"></i>
+                            <span>复制</span>
+                        </button>
+                    </div>
+                    <textarea id="workspaceSessionId" readonly rows="3"
+                        class="w-full p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 focus:outline-none resize-none"></textarea>
+                </div>
+
+                <!-- Server URL -->
+                <div>
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Server URL</label>
+                        <button onclick="copyToClipboard('workspaceServerUrl')" class="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center space-x-1 font-medium transition">
+                            <i class="fa-regular fa-copy"></i>
+                            <span>复制</span>
+                        </button>
+                    </div>
+                    <input type="text" id="workspaceServerUrl" readonly
+                        class="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl font-mono text-xs text-slate-700 dark:text-slate-300 focus:outline-none">
+                </div>
+            </div>
+
+            <div class="pt-2 flex justify-end">
+                <button onclick="toggleSessionModal()" class="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg transition border border-slate-200 dark:border-slate-700">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ==================== EXCEL-LIKE DATA VIEWER MODAL ==================== -->
+    <div id="dataViewerModal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 w-full max-w-6xl h-[80vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden transition-all duration-200">
+            <!-- Modal Header -->
+            <div class="px-6 py-4 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+                <div class="flex items-center space-x-3">
+                    <div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 p-2 rounded-lg">
+                        <i class="fa-solid fa-file-excel text-lg"></i>
+                    </div>
+                    <div>
+                        <h3 id="dataViewerTitle" class="text-sm font-bold text-slate-800 dark:text-white">备份数据查看器</h3>
+                        <p id="dataViewerSubtitle" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">读取本地 CSV 格式及数据库备份明细</p>
+                    </div>
+                </div>
+                
+                <div class="flex items-center space-x-3">
+                    <!-- Search input -->
+                    <div class="relative w-48 sm:w-64">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                            <i class="fa-solid fa-magnifying-glass text-xs"></i>
+                        </span>
+                        <input type="text" id="dataViewerSearch" oninput="filterViewerData()" placeholder="搜索数据列..." class="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-850 text-slate-700 dark:text-slate-350 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    </div>
+                    <!-- Close button -->
+                    <button onclick="closeDataViewerModal()" class="text-slate-400 dark:text-slate-500 hover:text-slate-650 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Modal Body (Table scroll area) -->
+            <div class="flex-grow overflow-auto p-6 bg-slate-50/50 dark:bg-slate-950/20">
+                <div id="dataViewerLoading" class="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
+                    <i class="fa-solid fa-spinner animate-spin text-3xl mb-3"></i>
+                    <p class="text-xs">正在读取并渲染备份数据，请稍候...</p>
+                </div>
+                
+                <div id="dataViewerEmpty" class="hidden flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
+                    <i class="fa-regular fa-folder-open text-4xl mb-3 text-slate-300 dark:text-slate-700"></i>
+                    <p class="text-xs">暂无已备份的明细数据</p>
+                </div>
+                
+                <!-- Spreadsheet Table -->
+                <div id="dataViewerTableContainer" class="hidden overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-sm">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr id="dataViewerTableHeader" class="bg-slate-50 dark:bg-slate-850/50 text-slate-650 dark:text-slate-300 text-xs font-bold border-b border-slate-200 dark:border-slate-800">
+                                <!-- Dynamic headers -->
+                            </tr>
+                        </thead>
+                        <tbody id="dataViewerTableBody" class="text-xs text-slate-700 dark:text-slate-300 divide-y divide-slate-200 dark:divide-slate-800/60">
+                            <!-- Dynamic rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Modal Footer -->
+            <div class="px-6 py-3 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                <div>
+                    共检测到 <span id="dataViewerTotalCount" class="font-bold text-slate-650 dark:text-slate-300">0</span> 条记录
+                </div>
+                <div>
+                    显示范围: 1 - <span id="dataViewerVisibleCount" class="font-bold text-slate-650 dark:text-slate-300">0</span> 条
+                </div>
+            </div>
+        </div>
+    </div>
+    </div>
+
+
+    <!-- ==================== CORE JAVASCRIPT ==================== -->
+    <script>
+        // Master records array (SFDC master data lists with current progress fields)
+        let masterRecords = [];
+
+        let selectedRecordIndex = 0; // Currently selected master record
+        let tasksConfig = {};
+        let sessionData = null;
+
+        // Enforce strict ordering of subtasks: User (1st), Customer/Account (2nd), Inquiry/XX (3rd)
+        function getOrderedTasks(tasks) {
+            const order = ['user', 'account', 'customer', 'inquiry', 'xx'];
+            return Object.values(tasks).sort((a, b) => {
+                let idxA = order.indexOf(a.key);
+                if (idxA === -1) idxA = 999;
+                let idxB = order.indexOf(b.key);
+                if (idxB === -1) idxB = 999;
+                return idxA - idxB;
+            });
+        }
+
+        // Theme management
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light'; // Default is Light (white)!
+            const html = document.documentElement;
+            const icon = document.getElementById('themeToggleIcon');
+            const iconWorkspace = document.getElementById('themeToggleIconWorkspace');
+            
+            if (savedTheme === 'dark') {
+                html.classList.add('dark');
+                html.classList.remove('light');
+                if (icon) icon.className = 'fa-solid fa-sun text-lg';
+                if (iconWorkspace) iconWorkspace.className = 'fa-solid fa-sun';
+            } else {
+                html.classList.remove('dark');
+                html.classList.add('light');
+                if (icon) icon.className = 'fa-solid fa-moon text-lg';
+                if (iconWorkspace) iconWorkspace.className = 'fa-solid fa-moon';
+            }
+        }
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const icon = document.getElementById('themeToggleIcon');
+            const iconWorkspace = document.getElementById('themeToggleIconWorkspace');
+            
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                html.classList.add('light');
+                localStorage.setItem('theme', 'light');
+                if (icon) icon.className = 'fa-solid fa-moon text-lg';
+                if (iconWorkspace) iconWorkspace.className = 'fa-solid fa-moon';
+            } else {
+                html.classList.add('dark');
+                html.classList.remove('light');
+                localStorage.setItem('theme', 'dark');
+                if (icon) icon.className = 'fa-solid fa-sun text-lg';
+                if (iconWorkspace) iconWorkspace.className = 'fa-solid fa-sun';
+            }
+        }
+
+        // Initialize Theme on startup
+        initTheme();
+
+        function togglePasswordVisibility() {
+            const passwordInput = document.getElementById('password');
+            const icon = document.getElementById('passwordToggleIcon');
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+
+        function toggleSessionModal() {
+            const modal = document.getElementById('sessionModal');
+            modal.classList.toggle('hidden');
+        }
+
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            element.select();
+            element.setSelectionRange(0, 99999);
+            
+            try {
+                navigator.clipboard.writeText(element.value);
+                const btn = event.currentTarget;
+                const originalText = btn.innerHTML;
+                btn.innerHTML = `<i class="fa-solid fa-check text-emerald-500"></i><span class="text-emerald-500">已复制!</span>`;
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 2000);
+            } catch (err) {
+                console.error('无法复制: ', err);
+            }
+        }
+
+        function copySql(element, key) {
+            const task = tasksConfig[key];
+            if (!task || !task.sql) return;
+            navigator.clipboard.writeText(task.sql).then(() => {
+                const originalText = element.innerHTML;
+                element.innerHTML = "SQL: <span class='text-emerald-600 dark:text-emerald-400 font-bold'>已复制到剪贴板！</span>";
+                setTimeout(() => {
+                    element.innerHTML = originalText;
+                }, 1500);
+            }).catch(err => {
+                console.error("复制失败: ", err);
+            });
+        }
+
+        // --- Master Data List View Rendering ---
+        function renderMasterRecordsList() {
+            const tbody = document.getElementById('masterRecordsListBody');
+            tbody.innerHTML = '';
+
+            masterRecords.forEach((record, index) => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 dark:hover:bg-slate-850/25 border-b border-slate-150 dark:border-slate-800/60 transition cursor-pointer";
+                tr.onclick = (e) => {
+                    if(e.target.tagName !== 'A') {
+                        viewRecordDetails(index);
+                    }
+                };
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4">
+                        <a href="#" onclick="viewRecordDetails(${index}); event.stopPropagation();" class="text-blue-600 dark:text-blue-450 hover:underline font-bold">${record.name}</a>
+                    </td>
+                    <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.province}</td>
+                    <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.city}</td>
+                    <td class="px-6 py-4">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${record.progressColor}">
+                            <span class="w-1.5 h-1.5 rounded-full bg-current mr-1.5"></span>
+                            ${record.progressText}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.owner}</td>
+                    <td class="px-6 py-4 text-slate-455 dark:text-slate-500 font-mono">${record.createdByTime}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Navigate to record detail view
+        function viewRecordDetails(index) {
+            selectedRecordIndex = index;
+            tasksConfig = masterRecords[index].subtasks;
+
+            const record = masterRecords[index];
+
+            // Update Breadcrumb & header titles
+            document.getElementById('breadcrumbRecordName').textContent = record.name;
+            document.getElementById('detailRecordName').textContent = record.name;
+
+            // Sync switches toggles and re-render nested sub-tasks table
+            renderDetailSubtasksTable();
+            renderTable();
+            renderBackupTab();
+
+            // Toggle view panels
+            document.getElementById('operationsListView').classList.add('hidden');
+            document.getElementById('operationsDetailView').classList.remove('hidden');
+
+            // Load terminal logs first, then append the transition log
+            loadTerminalLogs(record.id || record.name).then(() => {
+                appendLog(`切换至主配置记录 [${record.name}]。已提取关联的子任务项。`, 'neutral', true);
+            });
+            
+            // Asynchronously fetch subtask counts
+            fetchSubtaskCounts(record.id || record.name);
+        }
+
+        // Show Master configuration records list
+        function showOperationsList() {
+            renderMasterRecordsList();
+            document.getElementById('operationsDetailView').classList.add('hidden');
+            document.getElementById('operationsListView').classList.remove('hidden');
+        }
+
+        // Render the nested sub-tasks configuration table inside the record detail view
+        function renderDetailSubtasksTable() {
+            const tbody = document.getElementById('detailSubtasksTableBody');
+            tbody.innerHTML = '';
+
+            getOrderedTasks(tasksConfig).forEach(task => {
+                const tr = document.createElement('tr');
+                if (task.runState === 'running') {
+                    tr.className = "running-row hover:bg-slate-50/80 dark:hover:bg-slate-850/20 transition";
+                } else {
+                    tr.className = "hover:bg-slate-50/80 dark:hover:bg-slate-850/20 transition";
+                }
+                
+                // Colors and icons matching types dynamically from Salesforce describe metadata
+                let dotColorClass = 'bg-blue-500/10 text-blue-500 font-bold';
+                let iconChar = 'U';
+                let badgeClass = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+                let apiName = task.objectApiName || 'User';
+
+                if (task.key === 'account' || task.key === 'customer' || apiName === 'Account') {
+                    dotColorClass = 'bg-purple-500/10 text-purple-500 font-bold';
+                    iconChar = 'A';
+                    badgeClass = 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20';
+                    apiName = 'Account';
+                } else if (task.key === 'user' || apiName === 'User') {
+                    dotColorClass = 'bg-blue-500/10 text-blue-500 font-bold';
+                    iconChar = 'U';
+                    badgeClass = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+                    apiName = 'User';
+                } else if (task.key === 'inquiry' || task.key === 'xx' || apiName.includes('Inquiry') || apiName.includes('xx') || apiName.includes('XX')) {
+                    dotColorClass = 'bg-teal-500/10 text-teal-500 font-bold';
+                    iconChar = 'I'; // Icon char for Inquiry (询价)
+                    badgeClass = 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20';
+                } else {
+                    dotColorClass = 'bg-slate-500/10 text-slate-500 font-bold';
+                    iconChar = 'C';
+                    badgeClass = 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20';
+                }
+
+                const hasNoData = parseInt(task.count) === 0;
+
+                // Check if this subtask is mandatory (User & Customer are required to process)
+                const isMandatory = (task.key === 'user' || task.key === 'customer' || task.key === 'account' || apiName === 'User' || apiName === 'Account');
+                if (hasNoData) {
+                    task.execute = false; // Force execute to false if no data
+                } else if (isMandatory) {
+                    task.execute = true; // Always force execute to true
+                }
+
+                // Dynamic display for Backup Status column
+                let backupStatusBadge = '';
+                if (task.runState === 'running') {
+                    backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.5)]"><i class="fa-solid fa-spinner animate-spin mr-1.5 text-[8px]"></i>正在备份...</span>`;
+                } else if (hasNoData) {
+                    backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"><i class="fa-solid fa-ban mr-1.5 text-[8px]"></i>无数据</span>`;
+                } else if (task.backupState === 'success') {
+                    backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"><i class="fa-solid fa-circle-check mr-1.5 text-[8px]"></i>已完成</span>`;
+                } else {
+                    backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"><i class="fa-regular fa-clock mr-1.5 text-[8px]"></i>未完成</span>`;
+                }
+
+                const cursorClass = (isMandatory || hasNoData) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer';
+                const checkedAttr = task.execute ? 'checked' : '';
+                const disabledAttr = (isMandatory || hasNoData) ? 'disabled' : '';
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4">
+                        <div class="flex items-center space-x-3">
+                            <div class="w-8 h-8 rounded-lg ${dotColorClass} flex items-center justify-center text-xs shrink-0">
+                                ${iconChar}
+                            </div>
+                            <div>
+                                <div class="font-bold text-slate-800 dark:text-white">
+                                    ${task.runState === 'running' ? `
+                                        <div class="flex items-center">
+                                            <span class="relative flex h-2 w-2 mr-2">
+                                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                                <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                                            </span>
+                                            <button onclick="viewBackupData('${task.key}', '${task.name}')" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline font-bold text-left">
+                                                ${task.name}
+                                            </button>
+                                        </div>
+                                    ` : `
+                                        <button onclick="viewBackupData('${task.key}', '${task.name}')" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline font-bold text-left">
+                                            ${task.name}
+                                        </button>
+                                    `}
+                                </div>
+                                <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-mono">API Name: ${apiName}</div>
+                                 <div onclick="copySql(this, '${task.key}')" class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 max-w-sm lg:max-w-xl truncate font-mono cursor-pointer hover:underline" title="点击复制 SQL">
+                                     SQL: ${task.sql || 'N/A'}
+                                 </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 font-mono text-slate-650 dark:text-slate-300 font-medium">${task.count}</td>
+                    <td class="px-6 py-4">
+                        ${backupStatusBadge}
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        <label class="relative inline-flex items-center ${cursorClass}">
+                            <input type="checkbox" id="exec-switch-${task.key}" ${checkedAttr} ${disabledAttr} onchange="updateTaskExecution('${task.key}')" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                    </td>
+                    <td class="px-6 py-4 text-center whitespace-nowrap">
+                        ${hasNoData ? `
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>
+                        ` : `
+                            <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-bold transition mr-1.5">备份</button>
+                            <button onclick="updateSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-md border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold transition mr-1.5">更新</button>
+                            <button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition">重试</button>
+                        `}
+                    </td>
+                `;
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        // State update functions triggered by operations config switches
+        async function updateTaskExecution(key) {
+            const isChecked = document.getElementById(`exec-switch-${key}`).checked;
+            tasksConfig[key].execute = isChecked;
+            if (!isChecked) {
+                tasksConfig[key].runState = 'ignored';
+            } else {
+                tasksConfig[key].runState = 'ready';
+            }
+            renderTable();
+            renderBackupTab();
+            appendLog(`主配置 [${masterRecords[selectedRecordIndex].name}] - 子任务 [${tasksConfig[key].name}]: 执行状态修改为 [${isChecked ? '要执行' : '不执行'}]`, 'neutral');
+
+            // Persist configuration in SQLite database
+            const record = masterRecords[selectedRecordIndex];
+            try {
+                await fetch('/api/save-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bu_config_id: record.id || record.name,
+                        subtask_key: key,
+                        execute: isChecked
+                    })
+                });
+            } catch (err) {
+                console.error("保存配置失败", err);
+            }
+        }
+
+        // Asynchronously fetch subtask counts
+        async function fetchSubtaskCounts(buConfigId) {
+            if (!sessionData) return;
+            
+            // Set all count columns for current tasksConfig to "计算中..." or a spinner
+            Object.keys(tasksConfig).forEach(key => {
+                const countVal = tasksConfig[key].count;
+                if (countVal === "计算中..." || !countVal || countVal.includes("spinner")) {
+                    tasksConfig[key].count = '<i class="fa-solid fa-spinner animate-spin text-xs text-indigo-500"></i>';
+                }
+            });
+            renderDetailSubtasksTable();
+            
+            try {
+                const response = await fetch('/api/subtask-counts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bu_config_id: buConfigId,
+                        sessionId: sessionData.sessionId,
+                        serverUrl: sessionData.serverUrl
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success && data.counts) {
+                    Object.keys(data.counts).forEach(key => {
+                        if (tasksConfig[key]) {
+                            tasksConfig[key].count = data.counts[key];
+                        }
+                    });
+                    renderDetailSubtasksTable();
+                    renderBackupTab();
+                }
+            } catch (err) {
+                console.error("加载数据量失败", err);
+            }
+        }
+
+        // State update functions triggered by operations config backup switches
+        function updateTaskBackup(key) {
+            const isChecked = document.getElementById(`backup-switch-${key}`).checked;
+            tasksConfig[key].backup = isChecked;
+            renderBackupTab();
+            appendLog(`主配置 [${masterRecords[selectedRecordIndex].name}] - 子任务 [${tasksConfig[key].name}]: 刷新前备份修改为 [${isChecked ? '启用' : '禁用'}]`, 'neutral');
+            renderTable();
+        }
+
+        // Sync inputs in operations tab
+        function syncSwitchesToUI() {
+            Object.keys(tasksConfig).forEach(key => {
+                const execSwitch = document.getElementById(`exec-switch-${key}`);
+                const backupSwitch = document.getElementById(`backup-switch-${key}`);
+                if (execSwitch) execSwitch.checked = tasksConfig[key].execute;
+                if (backupSwitch) backupSwitch.checked = tasksConfig[key].backup;
+            });
+        }
+
+        // Render the logs status table dynamically based on config state
+        function renderTable() {
+            const tbody = document.getElementById('refreshStatusTableBody');
+            if (!tbody) return; // Table was removed on Logs tab, but check just in case
+            tbody.innerHTML = '';
+
+            getOrderedTasks(tasksConfig).forEach(task => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 dark:hover:bg-slate-800/20 border-b border-slate-200 dark:border-slate-800/60 transition-colors";
+                
+                let dotColor = 'bg-blue-500';
+                if (task.key === 'customer' || task.key === 'account') dotColor = 'bg-purple-500';
+                if (task.key === 'xx' || task.key === 'inquiry') dotColor = 'bg-teal-500';
+
+                let backupBadge = '';
+                if (parseInt(task.count) === 0) {
+                    backupBadge = `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                            <i class="fa-solid fa-ban mr-1 text-[10px]"></i>无数据
+                        </span>
+                    `;
+                } else if (task.backupState === 'success') {
+                    backupBadge = `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <i class="fa-solid fa-circle-check mr-1 text-[10px]"></i>已备份
+                        </span>
+                    `;
+                } else {
+                    backupBadge = task.backup ? `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                            待备份
+                        </span>
+                    ` : `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                            未备份
+                        </span>
+                    `;
+                }
+
+                let runBadge = '';
+                if (!task.execute) {
+                    runBadge = `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800/50 text-slate-450 dark:text-slate-500 border border-slate-200 dark:border-slate-800">
+                            不操作
+                        </span>
+                    `;
+                } else {
+                    switch (task.runState) {
+                        case 'ready':
+                            runBadge = `
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                                    未操作
+                                </span>
+                            `;
+                            break;
+                        case 'running':
+                            if (task.key === 'user') {
+                                runBadge = `
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 animate-pulse">
+                                        <i class="fa-solid fa-arrows-rotate mr-1 text-[10px] animate-spin"></i>失败2条，正在刷新
+                                    </span>
+                                `;
+                            } else {
+                                runBadge = `
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 animate-pulse">
+                                        <i class="fa-solid fa-spinner mr-1 text-[10px] animate-spin"></i>正在刷新
+                                    </span>
+                                `;
+                            }
+                            break;
+                        case 'success':
+                            runBadge = `
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                    <i class="fa-solid fa-circle-check mr-1 text-[10px]"></i>刷新成功
+                                </span>
+                            `;
+                            break;
+                        case 'failed':
+                            runBadge = `
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+                                    <i class="fa-solid fa-circle-xmark mr-1 text-[10px]"></i>刷新失败
+                                </span>
+                            `;
+                            break;
+                    }
+                }
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4">
+                        <div class="flex items-center space-x-2.5">
+                            <div class="w-2.5 h-2.5 rounded-full ${dotColor}"></div>
+                            <span class="text-sm font-semibold text-slate-800 dark:text-slate-200">子任务：${task.name}</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 font-mono text-sm text-slate-600 dark:text-slate-300">${task.count}</td>
+                    <td class="px-6 py-4">${backupBadge}</td>
+                    <td class="px-6 py-4">${runBadge}</td>
+                `;
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Render Backup tab list based on state
+        function renderBackupTab() {
+            const container = document.getElementById('backupListContainer');
+            if (!container) return;
+            container.innerHTML = '';
+
+            getOrderedTasks(tasksConfig).forEach(task => {
+                const label = document.createElement('label');
+                label.className = `flex items-center justify-between p-4 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-850/20 transition rounded-lg ${!task.execute ? 'opacity-50' : ''}`;
+                
+                label.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <input type="checkbox" id="backup-chk-${task.key}" ${task.backup ? 'checked' : ''} 
+                            onchange="syncBackupCheckbox('${task.key}')"
+                            class="w-4 h-4 rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-white dark:focus:ring-offset-slate-900 cursor-pointer">
+                        <span class="text-sm font-semibold text-slate-800 dark:text-slate-200">子任务备份：${task.name}</span>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xs text-slate-400 font-mono">${task.count}</span>
+                        ${parseInt(task.count) === 0 ? '<span class="text-xs text-slate-450 dark:text-slate-500 font-medium"><i class="fa-solid fa-ban mr-0.5"></i>无需备份</span>' : (task.backupState === 'success' ? '<span class="text-xs text-emerald-500 font-medium"><i class="fa-solid fa-check mr-0.5"></i>已生成备份</span>' : '')}
+                    </div>
+                `;
+                container.appendChild(label);
+            });
+        }
+
+        function syncBackupCheckbox(key) {
+            const isChecked = document.getElementById(`backup-chk-${key}`).checked;
+            tasksConfig[key].backup = isChecked;
+            
+            // Sync the checkbox inside the nested subtasks table if it's currently rendered
+            const switchEl = document.getElementById(`backup-switch-${key}`);
+            if (switchEl) switchEl.checked = isChecked;
+            
+            appendLog(`子任务 [${tasksConfig[key].name}]: 备份配置同步变更为 [${isChecked ? '启用' : '禁用'}]`, 'neutral');
+            renderTable();
+        }
+
+        // --- Backups Local Directory File Tree Rendering ---
+        async function loadBackupTree() {
+            const container = document.getElementById('backupTreeContainer');
+            container.innerHTML = '<div class="text-slate-400 dark:text-slate-500 py-4 text-center"><i class="fa-solid fa-spinner animate-spin mr-1.5"></i>正在加载备份目录树...</div>';
+            
+            try {
+                const response = await fetch('/api/backup/tree');
+                const data = await response.json();
+                
+                if (response.ok && data && data.length > 0) {
+                    container.innerHTML = '';
+                    data.forEach(rootNode => {
+                        container.appendChild(renderTreeNode(rootNode, 0));
+                    });
+                } else {
+                    container.innerHTML = '<div class="text-slate-400 dark:text-slate-500 py-4 text-center">暂无备份文件数据</div>';
+                }
+            } catch (err) {
+                console.error("加载文件树失败", err);
+                container.innerHTML = '<div class="text-red-500 py-4 text-center"><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>加载备份树失败</div>';
+            }
+        }
+
+        function renderTreeNode(node, depth) {
+            const wrapper = document.createElement('div');
+            wrapper.className = "select-none";
+            
+            const item = document.createElement('div');
+            item.className = `flex items-center space-x-2 py-1.5 px-2.5 hover:bg-slate-100 dark:hover:bg-slate-800/40 rounded cursor-pointer transition`;
+            item.style.paddingLeft = `${depth * 16 + 8}px`;
+            
+            // Icon choosing
+            let icon = '<i class="fa-solid fa-folder text-yellow-500"></i>';
+            if (node.type === 'file') {
+                icon = '<i class="fa-solid fa-file-csv text-emerald-500"></i>';
+            } else if (node.name === 'olympus') {
+                icon = '<i class="fa-solid fa-database text-indigo-500"></i>';
+            }
+
+            let info = '';
+            if (node.type === 'file' && node.size) {
+                info = `<span class="text-[10px] text-slate-400 dark:text-slate-500 pl-2">(${node.size})</span>`;
+            }
+
+            item.innerHTML = `
+                <span class="inline-block w-4 text-center">${icon}</span>
+                <span class="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate" title="${node.name}">${node.name}</span>
+                ${info}
+            `;
+            
+            wrapper.appendChild(item);
+            
+            if (node.type === 'directory' && node.children && node.children.length > 0) {
+                const childrenContainer = document.createElement('div');
+                // Open olympus root folder by default
+                if (node.name !== 'olympus') {
+                    childrenContainer.className = "transition-all duration-200";
+                } else {
+                    childrenContainer.className = "transition-all duration-200";
+                }
+                
+                node.children.forEach(child => {
+                    childrenContainer.appendChild(renderTreeNode(child, depth + 1));
+                });
+                
+                wrapper.appendChild(childrenContainer);
+                
+                item.onclick = () => {
+                    childrenContainer.classList.toggle('hidden');
+                    const folderIcon = item.querySelector('i');
+                    if (folderIcon.classList.contains('fa-folder')) {
+                        folderIcon.className = 'fa-solid fa-folder-open text-yellow-500';
+                    } else if (folderIcon.classList.contains('fa-folder-open')) {
+                        folderIcon.className = 'fa-solid fa-folder text-yellow-500';
+                    }
+                };
+            } else if (node.type === 'file') {
+                item.onclick = () => {
+                    showDataViewerModal(`${node.name} - 备份数据查看`, `/api/backup/data?file_path=${encodeURIComponent(node.path)}`);
+                };
+            }
+            
+            return wrapper;
+        }
+
+        // --- SQLite Database Browser Functions ---
+        let dbViewerAllRecords = [];
+        let dbViewerColumns = [];
+
+        async function loadDbTables() {
+            const selector = document.getElementById('dbTableSelector');
+            if (!selector) return;
+            selector.innerHTML = '<option value="">-- 选择数据库表 --</option>';
+            
+            try {
+                const response = await fetch('/api/db/tables');
+                const data = await response.json();
+                if (response.ok && data.success && data.tables) {
+                    data.tables.forEach(table => {
+                        const opt = document.createElement('option');
+                        opt.value = table;
+                        opt.textContent = table;
+                        selector.appendChild(opt);
+                    });
+                }
+            } catch (err) {
+                console.error("加载数据库表列表失败", err);
+            }
+        }
+
+        async function loadDbTableData() {
+            const table = document.getElementById('dbTableSelector').value;
+            const placeholder = document.getElementById('dbViewerPlaceholder');
+            const viewerSection = document.getElementById('dbViewerSection');
+            const searchInput = document.getElementById('dbViewerSearch');
+            
+            if (!table) {
+                placeholder.classList.remove('hidden');
+                viewerSection.classList.add('hidden');
+                return;
+            }
+            
+            placeholder.classList.add('hidden');
+            viewerSection.classList.remove('hidden');
+            searchInput.value = '';
+            
+            const headerRow = document.getElementById('dbViewerTableHeader');
+            const tbody = document.getElementById('dbViewerTableBody');
+            headerRow.innerHTML = '<tr><td class="p-4"><i class="fa-solid fa-spinner animate-spin mr-1"></i>正在读取数据...</td></tr>';
+            tbody.innerHTML = '';
+            
+            dbViewerAllRecords = [];
+            dbViewerColumns = [];
+            
+            try {
+                const response = await fetch(`/api/db/table-data?table=${encodeURIComponent(table)}`);
+                const data = await response.json();
+                
+                if (response.ok && data.success && data.columns) {
+                    dbViewerColumns = data.columns;
+                    dbViewerAllRecords = data.records;
+                    renderDbTable(dbViewerAllRecords);
+                } else {
+                    headerRow.innerHTML = '<tr><td class="p-4 text-red-500">读取数据失败</td></tr>';
+                }
+            } catch (err) {
+                console.error("加载数据库表数据失败", err);
+                headerRow.innerHTML = '<tr><td class="p-4 text-red-500">网络连接异常</td></tr>';
+            }
+        }
+
+        function renderDbTable(records) {
+            const headerRow = document.getElementById('dbViewerTableHeader');
+            const tbody = document.getElementById('dbViewerTableBody');
+            
+            headerRow.innerHTML = '';
+            tbody.innerHTML = '';
+            
+            if (dbViewerColumns.length === 0) return;
+            
+            // Render Headers
+            dbViewerColumns.forEach(col => {
+                const th = document.createElement('th');
+                th.className = "px-4 py-3 font-semibold uppercase tracking-wider border-r border-slate-200 dark:border-slate-800 last:border-r-0";
+                th.textContent = col;
+                headerRow.appendChild(th);
+            });
+            
+            if (records.length === 0) {
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = dbViewerColumns.length;
+                td.className = "p-8 text-center text-slate-400 dark:text-slate-500 font-mono";
+                td.textContent = "暂无数据记录";
+                tr.appendChild(td);
+                tbody.appendChild(tr);
+                
+                document.getElementById('dbViewerTotalRows').textContent = '0';
+                document.getElementById('dbViewerVisibleRows').textContent = '0';
+                return;
+            }
+            
+            // Render Rows
+            records.forEach(r => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 dark:hover:bg-slate-850/20 border-b border-slate-200 dark:border-slate-800 last:border-b-0 transition-colors";
+                
+                dbViewerColumns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.className = "px-4 py-2.5 font-mono whitespace-nowrap border-r border-slate-200 dark:border-slate-800 last:border-r-0 max-w-xs truncate";
+                    
+                    let val = r[col];
+                    if (val === null || val === undefined) {
+                        val = "";
+                    } else if (typeof val === 'object') {
+                        val = JSON.stringify(val);
+                    } else if (typeof val === 'string' && (val.trim().startsWith('{') || val.trim().startsWith('['))) {
+                        try {
+                            const parsed = JSON.parse(val);
+                            val = JSON.stringify(parsed);
+                        } catch (e) {
+                            // ignore and use raw string
+                        }
+                    }
+                    td.textContent = val;
+                    td.title = val;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            
+            document.getElementById('dbViewerTotalRows').textContent = dbViewerAllRecords.length;
+            document.getElementById('dbViewerVisibleRows').textContent = records.length;
+        }
+
+        function filterDbTableData() {
+            const query = document.getElementById('dbViewerSearch').value.toLowerCase().trim();
+            if (!query) {
+                renderDbTable(dbViewerAllRecords);
+                return;
+            }
+            
+            const filtered = dbViewerAllRecords.filter(r => {
+                return Object.values(r).some(val => {
+                    if (val === null || val === undefined) return false;
+                    const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                    return valStr.toLowerCase().includes(query);
+                });
+            });
+            
+            renderDbTable(filtered);
+        }
+
+        // --- Spreadsheet Backup Data Viewer Functions ---
+        let viewerAllRecords = [];
+
+        async function viewBackupData(subtaskKey, taskName) {
+            const record = masterRecords[selectedRecordIndex];
+            const buConfigId = record.id || record.name;
+            showDataViewerModal(`${taskName} - 备份数据查看`, `/api/backup/data?bu_config_id=${encodeURIComponent(buConfigId)}&subtask_key=${encodeURIComponent(subtaskKey)}`);
+        }
+
+        async function showDataViewerModal(title, apiUrl) {
+            const modal = document.getElementById('dataViewerModal');
+            const titleElem = document.getElementById('dataViewerTitle');
+            const loading = document.getElementById('dataViewerLoading');
+            const empty = document.getElementById('dataViewerEmpty');
+            const tableContainer = document.getElementById('dataViewerTableContainer');
+            const searchInput = document.getElementById('dataViewerSearch');
+            
+            titleElem.textContent = title;
+            searchInput.value = '';
+            
+            modal.classList.remove('hidden');
+            loading.classList.remove('hidden');
+            empty.classList.add('hidden');
+            tableContainer.classList.add('hidden');
+            
+            viewerAllRecords = [];
+            
+            try {
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+                
+                if (response.ok && data.success && data.records && data.records.length > 0) {
+                    viewerAllRecords = data.records;
+                    renderViewerTable(viewerAllRecords);
+                    loading.classList.add('hidden');
+                    tableContainer.classList.remove('hidden');
+                } else {
+                    loading.classList.add('hidden');
+                    empty.classList.remove('hidden');
+                    document.getElementById('dataViewerTotalCount').textContent = '0';
+                    document.getElementById('dataViewerVisibleCount').textContent = '0';
+                }
+            } catch (err) {
+                console.error("加载备份数据明细失败", err);
+                loading.classList.add('hidden');
+                empty.classList.remove('hidden');
+                document.getElementById('dataViewerTotalCount').textContent = '0';
+                document.getElementById('dataViewerVisibleCount').textContent = '0';
+            }
+        }
+
+        function closeDataViewerModal() {
+            document.getElementById('dataViewerModal').classList.add('hidden');
+        }
+
+        function renderViewerTable(records) {
+            const headerRow = document.getElementById('dataViewerTableHeader');
+            const tbody = document.getElementById('dataViewerTableBody');
+            
+            headerRow.innerHTML = '';
+            tbody.innerHTML = '';
+            
+            if (records.length === 0) return;
+            
+            const columns = [];
+            records.forEach(r => {
+                Object.keys(r).forEach(k => {
+                    if (!columns.includes(k)) {
+                        columns.push(k);
+                    }
+                });
+            });
+            
+            const preferredOrder = ['Id', 'Name', 'id', 'name'];
+            preferredOrder.reverse().forEach(col => {
+                const idx = columns.findIndex(c => c.toLowerCase() === col.toLowerCase());
+                if (idx !== -1) {
+                    const [c] = columns.splice(idx, 1);
+                    columns.unshift(c);
+                }
+            });
+            
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.className = "px-4 py-3 font-semibold uppercase tracking-wider border-r border-slate-200 dark:border-slate-800 last:border-r-0";
+                th.textContent = col;
+                headerRow.appendChild(th);
+            });
+            
+            records.forEach(r => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 dark:hover:bg-slate-850/20 border-b border-slate-200 dark:border-slate-800 last:border-b-0 transition-colors";
+                
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.className = "px-4 py-2.5 font-mono whitespace-nowrap border-r border-slate-200 dark:border-slate-800 last:border-r-0 max-w-xs truncate";
+                    
+                    let val = r[col];
+                    if (val === null || val === undefined) {
+                        val = "";
+                    } else if (typeof val === 'object') {
+                        val = JSON.stringify(val);
+                    } else if (typeof val === 'string' && (val.trim().startsWith('{') || val.trim().startsWith('['))) {
+                        try {
+                            const parsed = JSON.parse(val);
+                            val = JSON.stringify(parsed);
+                        } catch (e) {
+                            // ignore and use raw string
+                        }
+                    }
+                    td.textContent = val;
+                    td.title = val;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            
+            document.getElementById('dataViewerTotalCount').textContent = viewerAllRecords.length;
+            document.getElementById('dataViewerVisibleCount').textContent = records.length;
+        }
+
+        function filterViewerData() {
+            const query = document.getElementById('dataViewerSearch').value.toLowerCase().trim();
+            if (!query) {
+                renderViewerTable(viewerAllRecords);
+                return;
+            }
+            
+            const filtered = viewerAllRecords.filter(r => {
+                return Object.values(r).some(val => {
+                    if (val === null || val === undefined) return false;
+                    const valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                    return valStr.toLowerCase().includes(query);
+                });
+            });
+            
+            renderViewerTable(filtered);
+        }
+
+        // Trigger manual backup
+        async function triggerActualBackup() {
+            const chkUser = document.getElementById('backup-chk-user') ? document.getElementById('backup-chk-user').checked : false;
+            const chkCustomer = document.getElementById('backup-chk-customer') ? document.getElementById('backup-chk-customer').checked : false;
+            const chkXx = document.getElementById('backup-chk-xx') ? document.getElementById('backup-chk-xx').checked : false;
+
+            let selectedTasks = [];
+            if (chkUser) selectedTasks.push({ key: 'user', name: '用户' });
+            if (chkCustomer) selectedTasks.push({ key: 'customer', name: '客户' });
+            if (chkXx) selectedTasks.push({ key: 'xx', name: 'XX对象' });
+
+            if (selectedTasks.length === 0) {
+                alert("请至少选择一个子任务进行备份！");
+                return;
+            }
+
+            // Switch to logs tab to see output
+            switchTab('logs');
+
+            appendLog("=== 【后台调用】手动触发本地元数据备份 ===", 'info');
+
+            for (const task of selectedTasks) {
+                appendLog(`正在请求后端创建子任务 [${task.name}] 的 CSV 备份数据...`, 'info');
+                
+                try {
+                    const response = await fetch('/api/backup', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            task_name: task.name
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    if (response.ok && data.success) {
+                        tasksConfig[task.key].backupState = 'success';
+                        renderTable();
+                        appendLog(`子任务 [${task.name}] 备份写入成功！物理路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
+                    } else {
+                        appendLog(`子任务 [${task.name}] 备份失败: ${data.error || '未知错误'}`, 'error');
+                    }
+                } catch (err) {
+                    appendLog(`子任务 [${task.name}] 备份失败: 网络连接异常`, 'error');
+                    console.error(err);
+                }
+            }
+
+            // Re-render and load tree
+            loadBackupTree();
+            renderBackupTab();
+            renderDetailSubtasksTable();
+        }
+
+        // Login Submit Handler
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const submitBtn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const btnSpinner = document.getElementById('btnSpinner');
+            const errorAlert = document.getElementById('loginErrorAlert');
+            const errorMessage = document.getElementById('loginErrorMessage');
+            
+            // UI Loading state
+            submitBtn.disabled = true;
+            btnText.textContent = "验证中...";
+            btnSpinner.classList.remove('hidden');
+            errorAlert.classList.add('hidden');
+
+            const env = document.querySelector('input[name="env"]:checked').value;
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const security_token = document.getElementById('securityToken').value.trim();
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ env, username, password, security_token })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    // Save credentials if Remember Me is checked
+                    const rememberMe = document.getElementById('rememberMe').checked;
+                    if (rememberMe) {
+                        localStorage.setItem('sfdc_env', env);
+                        localStorage.setItem('sfdc_username', username);
+                        localStorage.setItem('sfdc_password', password);
+                        localStorage.setItem('sfdc_token', security_token);
+                        localStorage.setItem('sfdc_remember', 'true');
+                    } else {
+                        localStorage.removeItem('sfdc_env');
+                        localStorage.removeItem('sfdc_username');
+                        localStorage.removeItem('sfdc_password');
+                        localStorage.removeItem('sfdc_token');
+                        localStorage.setItem('sfdc_remember', 'false');
+                    }
+
+                    sessionData = data;
+                    enterWorkspace();
+                } else {
+                    errorAlert.classList.remove('hidden');
+                    errorMessage.textContent = data.error || '登录鉴权遇到未知错误';
+                }
+            } catch (err) {
+                errorAlert.classList.remove('hidden');
+                errorMessage.textContent = '网络错误：无法连接到后端服务。请确保后端已经正确运行。';
+                console.error(err);
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = "立即登录";
+                btnSpinner.classList.add('hidden');
+            }
+        });
+
+        // Switch workspace tabs
+        function switchTab(tabId) {
+            const tabs = ['operations', 'logs', 'backup', 'database'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tabBtn-${t}`);
+                const content = document.getElementById(`tabContent-${t}`);
+                
+                if (t === tabId) {
+                    // Active state
+                    btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium text-white bg-indigo-600 shadow-md shadow-indigo-600/10";
+                    content.classList.remove('hidden');
+                } else {
+                    // Inactive state
+                    btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400";
+                    content.classList.add('hidden');
+                }
+            });
+            
+            // If operations tab is switched, make sure we show the list view by default
+            if(tabId === 'operations') {
+                showOperationsList();
+            }
+            
+            // Reload tree when backup tab is clicked
+            if (tabId === 'backup') {
+                loadBackupTree();
+            }
+            
+            // Reload database tables when database tab is clicked
+            if (tabId === 'database') {
+                loadDbTables();
+            }
+        }
+
+        // Fetch Salesforce config and dynamic sub-tasks
+        async function loadRefreshConfigs(showToast = false) {
+            if (!sessionData) return;
+            
+            appendLog(`正在连接 Salesforce SOAP 接口，描述并读取主配置对象 BU_Config_Refresh__c 字段信息...`, 'info');
+            
+            try {
+                const response = await fetch('/api/refresh-config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        sessionId: sessionData.sessionId,
+                        serverUrl: sessionData.serverUrl
+                    })
+                });
+                
+                const data = await response.json();
+                if (response.ok && data.success && data.records && data.records.length > 0) {
+                    masterRecords = data.records;
+                    if (selectedRecordIndex >= masterRecords.length) {
+                        selectedRecordIndex = 0;
+                    }
+                    tasksConfig = masterRecords[selectedRecordIndex].subtasks;
+                    
+                    // Asynchronously fetch counts and load logs for selected record
+                    const activeRecord = masterRecords[selectedRecordIndex];
+                    fetchSubtaskCounts(activeRecord.id || activeRecord.name);
+                    loadTerminalLogs(activeRecord.id || activeRecord.name);
+                    
+                    appendLog(`成功获取主数据刷新配置并自动拆分子任务！共加载 ${masterRecords.length} 项刷新配置。`, 'success');
+                    if (showToast) {
+                        alert("成功刷新并拉取最新的 Salesforce 配置配置！");
+                    }
+                } else {
+                    appendLog(`描述/查询 BU_Config_Refresh__c 失败: ${data.error || '未找到配置记录'}。已启用内置 Mock 刷新数据作为降级演练。`, 'warning');
+                    if (showToast) {
+                        alert(`拉取 Salesforce 数据失败: ${data.error || '未找到配置记录'}\n已使用内置 Mock 数据模拟展示`);
+                    }
+                }
+            } catch (err) {
+                appendLog(`初始化 SFDC 刷新配置异常。已启用内置 Mock 刷新数据作为降级演练。`, 'warning');
+                console.error(err);
+                if (showToast) {
+                    alert("网络错误：无法连接后台服务刷新主配置");
+                }
+            }
+            
+            // Re-render components
+            renderMasterRecordsList();
+            renderTable();
+            renderBackupTab();
+            renderDetailSubtasksTable();
+        }
+
+        // Enter Workspace View
+        async function enterWorkspace() {
+            document.getElementById('loginView').classList.add('hidden');
+            document.getElementById('workspaceView').classList.remove('hidden');
+            
+            // Hide floating theme switch when logged in
+            document.getElementById('themeToggleFloatingContainer').classList.add('hidden');
+
+            // Populate credentials info
+            if (sessionData) {
+                const userFullName = sessionData.userInfo?.userFullName || '未知用户';
+                const userEmail = sessionData.userInfo?.userEmail || sessionData.userId || 'user@company.com';
+                
+                document.getElementById('userAvatarCircle').textContent = userFullName.charAt(0).toUpperCase();
+                document.getElementById('userDisplayName').textContent = userFullName;
+                document.getElementById('userDisplayEmail').textContent = userEmail;
+                
+                document.getElementById('headerServerUrl').textContent = sessionData.serverUrl;
+                document.getElementById('workspaceSessionId').value = sessionData.sessionId;
+                document.getElementById('workspaceServerUrl').value = sessionData.serverUrl;
+
+                // Initialize terminal body content
+                const terminal = document.getElementById('terminalBody');
+                terminal.innerHTML = '';
+                
+                appendLog(`INITIALIZING BASE SYSTEM LOGS...`, 'neutral');
+                const simpleDomain = sessionData.serverUrl.split('/')[2];
+                appendLog(`SOAP 接口连接就绪，环境指向: <span class="text-indigo-400">${simpleDomain}</span>`, 'info');
+                appendLog(`登录成功。授权用户: <span class="text-blue-400">${userEmail}</span>`, 'success');
+
+                // Fetch Salesforce Configs dynamically
+                await loadRefreshConfigs(false);
+                
+                // Render views
+                loadBackupTree();
+                initTheme(); // Ensure header icon matches state
+                
+                // Show default tab (Operations)
+                switchTab('operations');
+            }
+        }
+
+        // Logout
+        function logout() {
+            sessionData = null;
+            document.getElementById('loginForm').reset();
+            document.getElementById('workspaceView').classList.add('hidden');
+            document.getElementById('loginView').classList.remove('hidden');
+            
+            // Show floating theme switch back on login screen
+            document.getElementById('themeToggleFloatingContainer').classList.remove('hidden');
+            initTheme();
+        }
+
+        // Clear Logs both from UI and SQLite
+        async function clearLogs() {
+            const terminal = document.getElementById('terminalBody');
+            terminal.innerHTML = `<div class="text-slate-500">[${new Date().toISOString().slice(11,19)}] LOGS CLEARED BY USER.</div>`;
+            
+            if (masterRecords && masterRecords[selectedRecordIndex]) {
+                const record = masterRecords[selectedRecordIndex];
+                const buConfigId = record.id || record.name;
+                try {
+                    await fetch(`/api/logs/${encodeURIComponent(buConfigId)}`, {
+                        method: 'DELETE'
+                    });
+                } catch (err) {
+                    console.error("清空日志数据库失败", err);
+                }
+            }
+        }
+
+        // Append log helper with optional SQLite database persistence
+        async function appendLog(message, type = 'info', persist = true) {
+            const terminal = document.getElementById('terminalBody');
+            const time = new Date().toISOString().slice(11,19);
+            const line = document.createElement('div');
+            
+            let prefix = `<span class="text-emerald-400">INFO:</span>`;
+            if (type === 'success') prefix = `<span class="text-emerald-400">SUCCESS:</span>`;
+            if (type === 'warning') prefix = `<span class="text-amber-400">WARNING:</span>`;
+            if (type === 'error') prefix = `<span class="text-red-500">ERROR:</span>`;
+            if (type === 'neutral') prefix = ``;
+
+            line.innerHTML = `<span class="text-slate-500">[${time}]</span> ${prefix} ${message}`;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+
+            if (persist && masterRecords && masterRecords[selectedRecordIndex]) {
+                const record = masterRecords[selectedRecordIndex];
+                const buConfigId = record.id || record.name;
+                try {
+                    await fetch('/api/logs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            bu_config_id: buConfigId,
+                            log_type: type,
+                            message: message
+                        })
+                    });
+                } catch (err) {
+                    console.error("保存日志失败:", err);
+                }
+            }
+        }
+
+        // Asynchronously load historical terminal logs from database
+        async function loadTerminalLogs(buConfigId) {
+            const terminal = document.getElementById('terminalBody');
+            terminal.innerHTML = '<div class="text-slate-400 dark:text-slate-500 py-4 text-center"><i class="fa-solid fa-spinner animate-spin mr-1.5 text-indigo-500"></i>正在加载历史日志...</div>';
+            
+            try {
+                const response = await fetch(`/api/logs/${encodeURIComponent(buConfigId)}`);
+                const data = await response.json();
+                if (response.ok && data.success && data.logs && data.logs.length > 0) {
+                    terminal.innerHTML = '';
+                    data.logs.forEach(log => {
+                        let timeStr = "";
+                        if (log.timestamp && log.timestamp.length >= 19) {
+                            timeStr = log.timestamp.substring(11, 19);
+                        } else {
+                            timeStr = new Date().toISOString().slice(11, 19);
+                        }
+                        
+                        const line = document.createElement('div');
+                        let prefix = `<span class="text-emerald-400">INFO:</span>`;
+                        if (log.type === 'success') prefix = `<span class="text-emerald-400">SUCCESS:</span>`;
+                        if (log.type === 'warning') prefix = `<span class="text-amber-400">WARNING:</span>`;
+                        if (log.type === 'error') prefix = `<span class="text-red-500">ERROR:</span>`;
+                        if (log.type === 'neutral') prefix = ``;
+
+                        line.innerHTML = `<span class="text-slate-500">[${timeStr}]</span> ${prefix} ${log.message}`;
+                        terminal.appendChild(line);
+                    });
+                    terminal.scrollTop = terminal.scrollHeight;
+                } else {
+                    terminal.innerHTML = `<div class="text-slate-500 font-mono">[${new Date().toISOString().slice(11,19)}] 系统就绪，等待执行。暂无此配置的历史日志。</div>`;
+                }
+            } catch (err) {
+                console.error("加载历史日志失败", err);
+                terminal.innerHTML = '<div class="text-red-500 py-4 text-center"><i class="fa-solid fa-triangle-exclamation mr-1.5 font-bold"></i>加载历史日志失败</div>';
+            }
+        }
+
+        // Trigger the refresh workflow from the configuration page
+        function runRefreshProcess() {
+            simulateMockRefresh();
+        }
+
+        // Simulate a mock refresh action that respects the operations switches
+        async function simulateMockRefresh() {
+            const record = masterRecords[selectedRecordIndex];
+            
+            // Log started
+            appendLog(`=== 【流程启动】拉取主数据刷新配置项 [${record.name}] 并进行子任务分发 ===`, 'info');
+            
+            // Reset run states to ready for active tasks, ignored for inactive
+            Object.keys(tasksConfig).forEach(key => {
+                if (tasksConfig[key].execute) {
+                    tasksConfig[key].runState = 'ready';
+                } else {
+                    tasksConfig[key].runState = 'ignored';
+                }
+            });
+            renderTable();
+            renderDetailSubtasksTable();
+
+            // Step 1: Pull SFDC Master Data
+            await new Promise(resolve => setTimeout(resolve, 800));
+            appendLog(`正在通过 SOAP API 查询主记录 [${record.name}] 元数据信息 (省: ${record.province}, 市: ${record.city})...`, 'info');
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            appendLog(`主配置拉取成功！成功拆分出该配置的 ${Object.keys(tasksConfig).length} 个关联子任务进程：`, 'success');
+            let idx = 1;
+            getOrderedTasks(tasksConfig).forEach(task => {
+                appendLog(`-> 子任务 ${idx} [${task.name}]: 待备份/处理数据量 ${task.count}`, 'neutral');
+                idx++;
+            });
+
+            // Step 2: Backups (Real folder/file backup creations on disk!)
+            await new Promise(resolve => setTimeout(resolve, 1400));
+            appendLog("【阶段 1】执行子任务备份检测流程...", 'info');
+            
+            for (const task of getOrderedTasks(tasksConfig)) {
+                if (task.execute) {
+                    // Highlight the active task in list
+                    task.runState = 'running';
+                    renderDetailSubtasksTable();
+                    renderTable();
+                    await new Promise(resolve => setTimeout(resolve, 600));
+
+                    if (parseInt(task.count) === 0) {
+                        appendLog(`子任务 [${task.name}] 无数据（0条记录），无需备份，跳过。`, 'success');
+                        task.runState = 'success';
+                        renderDetailSubtasksTable();
+                        renderTable();
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                        continue;
+                    }
+                    if (task.backupState === 'success') {
+                        appendLog(`子任务 [${task.name}] 已经备份完成（已在本地/数据库中记录），跳过重复备份。`, 'success');
+                        task.runState = 'success';
+                        renderDetailSubtasksTable();
+                        renderTable();
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                        continue;
+                    }
+                    appendLog(`正在执行子任务 [${task.name}] 的刷新前强制备份，记录数: ${task.count}...`, 'info');
+                    
+                    try {
+                        const response = await fetch('/api/backup', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                task_name: task.name,
+                                bu_config_id: record.id || record.name,
+                                subtask_key: task.key,
+                                sql: task.sql,
+                                sessionId: sessionData ? sessionData.sessionId : null,
+                                serverUrl: sessionData ? sessionData.serverUrl : null
+                            })
+                        });
+                        const data = await response.json();
+                        if (response.ok && data.success) {
+                            task.backupState = 'success';
+                            task.runState = 'success';
+                            if (data.resumed) {
+                                appendLog(`检测到断点备份数据，子任务 [${task.name}] 已恢复断点，备份记录数: ${data.count} 条。路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
+                            } else {
+                                appendLog(`子任务 [${task.name}] 刷新前备份写入成功！备份记录数: ${data.count} 条。路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
+                            }
+                        } else {
+                            task.runState = 'failed';
+                            appendLog(`子任务 [${task.name}] 刷新前备份写入失败: ${data.error}`, 'error');
+                        }
+                    } catch (e) {
+                        task.runState = 'failed';
+                        appendLog(`子任务 [${task.name}] 刷新前备份写入失败：网络连接异常`, 'error');
+                    }
+                    renderDetailSubtasksTable();
+                    renderTable();
+                    await new Promise(resolve => setTimeout(resolve, 600));
+                }
+            }
+            renderTable();
+            renderBackupTab();
+            renderDetailSubtasksTable();
+            loadBackupTree();
+
+            // Step 3: Completion
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            appendLog("【阶段 2】主数据备份配置执行汇总...", 'info');
+            
+            let anyActive = false;
+            getOrderedTasks(tasksConfig).forEach(task => {
+                if (task.execute) {
+                    task.runState = 'success';
+                    anyActive = true;
+                    appendLog(`子任务 [${task.name}] 最终执行结果：备份成功。`, 'success');
+                }
+            });
+
+            // Update parent list current progress value!
+            if (anyActive) {
+                record.progressText = '已完成';
+                record.progressColor = 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
+                appendLog(`主配置项 [${record.name}] 关联的全部子任务备份完毕。`, 'success');
+
+                // Persist progress update in SQLite
+                try {
+                    await fetch('/api/update-progress', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            bu_config_id: record.id || record.name,
+                            progressText: record.progressText,
+                            progressColor: record.progressColor
+                        })
+                    });
+                } catch (err) {
+                    console.error("更新进度失败", err);
+                }
+            } else {
+                appendLog("当前没有开启任何子任务执行，本次备份未做改动。", 'warning');
+            }
+
+            renderTable();
+            renderDetailSubtasksTable();
+            renderMasterRecordsList();
+        }
+
+        // Single subtask backup triggered manually from row Action button
+        async function backupSingleTask(key) {
+            const record = masterRecords[selectedRecordIndex];
+            const task = tasksConfig[key];
+            if (!task) return;
+            
+            // Set running state and render
+            task.runState = 'running';
+            renderDetailSubtasksTable();
+            renderTable();
+            
+            appendLog(`[手动触发] 开始为子任务 [${task.name}] 执行备份，记录数: ${task.count}...`, 'info');
+            
+            try {
+                const response = await fetch('/api/backup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        task_name: task.name,
+                        bu_config_id: record.id || record.name,
+                        subtask_key: task.key,
+                        sql: task.sql,
+                        sessionId: sessionData ? sessionData.sessionId : null,
+                        serverUrl: sessionData ? sessionData.serverUrl : null
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    task.backupState = 'success';
+                    task.runState = 'success';
+                    if (data.resumed) {
+                        appendLog(`[手动触发] 子任务 [${task.name}] 检测到断点备份数据，已恢复断点。路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
+                    } else {
+                        appendLog(`[手动触发] 子任务 [${task.name}] 备份成功！备份记录数: ${data.count} 条。路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
+                    }
+                } else {
+                    task.runState = 'failed';
+                    appendLog(`[手动触发] 子任务 [${task.name}] 备份失败: ${data.error}`, 'error');
+                }
+            } catch (e) {
+                task.runState = 'failed';
+                appendLog(`[手动触发] 子任务 [${task.name}] 备份失败：网络连接异常`, 'error');
+            }
+            
+            renderDetailSubtasksTable();
+            renderTable();
+            renderBackupTab();
+            loadBackupTree();
+        }
+
+        // Placeholder for subtask data update
+        function updateSingleTask(key) {
+            const task = tasksConfig[key];
+            alert(`已触发子任务 [${task.name}] 数据更新（逻辑待后续补充）`);
+            appendLog(`[手动触发] 子任务 [${task.name}] 数据更新触发（暂无具体逻辑，待后续补充）`, 'info');
+        }
+
+        // Placeholder for subtask retry logic
+        function retrySingleTask(key) {
+            const task = tasksConfig[key];
+            alert(`已触发子任务 [${task.name}] 重试（逻辑待后续补充）`);
+            appendLog(`[手动触发] 子任务 [${task.name}] 重试触发（暂无具体逻辑，待后续补充）`, 'info');
+        }
+
+        // Trigger the refresh workflow from the configuration page
+        function runDataRefreshProcess() {
+            alert("已触发开始刷新数据处理（逻辑待后续补充）");
+            appendLog("=== 【流程启动】开始刷新数据（暂无具体逻辑，待后续补充） ===", 'info');
+        }
+        
+        // Initialize Remembered Credentials on startup
+        function initRememberedCredentials() {
+            const remember = localStorage.getItem('sfdc_remember') === 'true';
+            const rememberCheckbox = document.getElementById('rememberMe');
+            if (rememberCheckbox) rememberCheckbox.checked = remember;
+            if (remember) {
+                const env = localStorage.getItem('sfdc_env');
+                const username = localStorage.getItem('sfdc_username');
+                const password = localStorage.getItem('sfdc_password');
+                const token = localStorage.getItem('sfdc_token');
+                
+                if (env) {
+                    const envRadio = document.querySelector(`input[name="env"][value="${env}"]`);
+                    if (envRadio) envRadio.checked = true;
+                }
+                if (username) document.getElementById('username').value = username;
+                if (password) document.getElementById('password').value = password;
+                if (token) document.getElementById('securityToken').value = token;
+            }
+        }
+
+        // Auto Login if credentials are saved in localStorage (never force re-login on refresh)
+        async function autoLoginOnStartup() {
+            const remember = localStorage.getItem('sfdc_remember') === 'true';
+            if (!remember) return;
+            
+            const env = localStorage.getItem('sfdc_env');
+            const username = localStorage.getItem('sfdc_username');
+            const password = localStorage.getItem('sfdc_password');
+            const token = localStorage.getItem('sfdc_token') || '';
+            
+            if (!env || !username || !password) return;
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const btnText = document.getElementById('btnText');
+            const btnSpinner = document.getElementById('btnSpinner');
+            const errorAlert = document.getElementById('loginErrorAlert');
+            
+            // Show loading indicators
+            submitBtn.disabled = true;
+            btnText.textContent = "自动登录中...";
+            btnSpinner.classList.remove('hidden');
+            errorAlert.classList.add('hidden');
+            
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        env: env, 
+                        username: username, 
+                        password: password, 
+                        security_token: token 
+                    })
+                });
+                
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    sessionData = data;
+                    enterWorkspace();
+                } else {
+                    console.warn("Auto-login failed:", data.error);
+                }
+            } catch (err) {
+                console.error("Auto-login request failed", err);
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = "立即登录";
+                btnSpinner.classList.add('hidden');
+            }
+        }
+
+        // Run startup initializations
+        initRememberedCredentials();
+        autoLoginOnStartup();
+    </script>
+</body>
+</html>
