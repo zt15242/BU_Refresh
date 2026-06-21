@@ -14,7 +14,9 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 
 # Check if running in a PyInstaller bundle
 if getattr(sys, 'frozen', False):
-    DATA_DIR = os.path.dirname(sys.executable)
+    # Use a user-writable folder in the user's home directory for database and backups
+    DATA_DIR = os.path.expanduser("~/BU省刷新工具")
+    os.makedirs(DATA_DIR, exist_ok=True)
 else:
     DATA_DIR = app.root_path
 
