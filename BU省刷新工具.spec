@@ -36,3 +36,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+import sys
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='BU省刷新工具.app',
+        icon=None,
+        bundle_identifier='com.bu.refresh.tool',
+    )

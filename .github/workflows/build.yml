@@ -1,0 +1,67 @@
+name: Build Executables
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pywebview pyinstaller
+
+      - name: Build macOS App
+        run: |
+          pyinstaller BU省刷新工具.spec --clean
+
+      - name: Compress macOS App
+        run: |
+          cd dist
+          zip -r BU省刷新工具_macOS.zip BU省刷新工具.app BU省刷新工具
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BU省刷新工具_macOS
+          path: dist/BU省刷新工具_macOS.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pywebview pyinstaller
+
+      - name: Build Windows Executable
+        run: |
+          pyinstaller BU省刷新工具.spec --clean
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BU省刷新工具_Windows
+          path: dist/BU省刷新工具.exe

@@ -108,6 +108,13 @@
                 <h2 class="text-2xl font-bold text-slate-800 dark:text-white mb-2 text-center">系统登录</h2>
                 <p class="text-sm text-slate-500 dark:text-slate-400 mb-6 text-center">使用 SFDC SOAP 接口进行鉴权以访问工作台</p>
 
+                <!-- Login Tab Selector -->
+                <div class="flex border-b border-slate-200 dark:border-slate-700 mb-5 text-sm">
+                    <button type="button" onclick="switchLoginTab('soap')" id="loginTabBtn-soap" class="flex-1 pb-2 font-semibold text-blue-600 dark:text-blue-500 border-b-2 border-blue-600 dark:border-blue-500">常规登录</button>
+                    <button type="button" onclick="switchLoginTab('sso')" id="loginTabBtn-sso" class="flex-1 pb-2 font-semibold text-slate-500 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-700 dark:hover:text-slate-350">单点登录 (SSO)</button>
+                    <button type="button" onclick="switchLoginTab('session')" id="loginTabBtn-session" class="flex-1 pb-2 font-semibold text-slate-500 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-700 dark:hover:text-slate-350">Session ID 导入</button>
+                </div>
+
                 <!-- Error Alert (Hidden by default) -->
                 <div id="loginErrorAlert" class="hidden mb-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-xl p-4 text-left">
                     <div class="flex items-start space-x-2.5">
@@ -119,6 +126,7 @@
                     </div>
                 </div>
 
+                <!-- Soap Login Form -->
                 <form id="loginForm" class="space-y-5">
                     <!-- Environment -->
                     <div>
@@ -197,6 +205,108 @@
                         class="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-lg shadow-blue-600/10 hover:shadow-blue-600/20 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition flex items-center justify-center space-x-2">
                         <span id="btnText">立即登录</span>
                         <div id="btnSpinner" class="hidden w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    </button>
+                </form>
+
+                <!-- SSO Login Form -->
+                <form id="ssoLoginForm" class="space-y-5 hidden" onsubmit="handleSsoLogin(event)">
+                    <!-- Custom Domain / Login URL -->
+                    <div>
+                        <label for="ssoLoginUrl" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">登录地址 (Login URL / Custom Domain)</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                                <i class="fa-solid fa-globe"></i>
+                            </span>
+                            <input type="url" id="ssoLoginUrl" required
+                                class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 transition"
+                                placeholder="https://login.sfcrmproducts.cn">
+                        </div>
+                        <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">支持输入企业自定义域名，例如：https://mycompany.my.sfcrmproducts.cn</div>
+                    </div>
+
+                    <!-- Client ID -->
+                    <div>
+                        <label for="ssoClientId" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">客户端 ID (Client ID / Consumer Key)</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                                <i class="fa-solid fa-id-card"></i>
+                            </span>
+                            <input type="text" id="ssoClientId" required
+                                class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 transition"
+                                placeholder="Salesforce Connected App 客户端 ID">
+                        </div>
+                    </div>
+
+                    <!-- Client Secret -->
+                    <div>
+                        <label for="ssoClientSecret" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">客户端密钥 (Client Secret / Consumer Secret) <span class="text-slate-400 font-normal lowercase">(可选)</span></label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                                <i class="fa-solid fa-key"></i>
+                            </span>
+                            <input type="password" id="ssoClientSecret"
+                                class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 transition"
+                                placeholder="若 Connected App 需要密钥则填写">
+                        </div>
+                    </div>
+
+                    <!-- SSO Redirect Info -->
+                    <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 text-[10px] text-slate-505 dark:text-slate-400 leading-relaxed">
+                        <i class="fa-solid fa-info-circle text-blue-500 mr-1"></i>
+                        请先在 Salesforce 关联应用 (Connected App) 中配置回调链接 (Redirect URI) 为：
+                        <span id="ssoRedirectUriText" class="font-mono font-bold text-slate-700 dark:text-slate-300">http://localhost:5000/oauth/callback</span>
+                    </div>
+
+                    <!-- SSO Remember Config -->
+                    <div class="flex items-center">
+                        <input type="checkbox" id="ssoRemember" class="w-4 h-4 rounded border-slate-350 dark:border-slate-700 bg-white dark:bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-white dark:focus:ring-offset-slate-900 cursor-pointer">
+                        <label for="ssoRemember" class="ml-2 text-xs font-semibold text-slate-600 dark:text-slate-400 cursor-pointer select-none">记住 OAuth 配置</label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" id="ssoSubmitBtn"
+                        class="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition flex items-center justify-center space-x-2">
+                        <span>跳转浏览器 SSO 登录</span>
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                    </button>
+                </form>
+
+                <!-- Session ID Import Form -->
+                <form id="sessionLoginForm" class="space-y-5 hidden" onsubmit="handleSessionImport(event)">
+                    <!-- Instance URL -->
+                    <div>
+                        <label for="importInstanceUrl" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">实例域名 (Instance URL)</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-400">
+                                <i class="fa-solid fa-server"></i>
+                            </span>
+                            <input type="url" id="importInstanceUrl" required
+                                class="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 transition"
+                                placeholder="https://mycompany.my.sfcrmproducts.cn">
+                        </div>
+                    </div>
+
+                    <!-- Session ID -->
+                    <div>
+                        <label for="importSessionId" class="block text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-2">Session ID / Access Token</label>
+                        <div class="relative">
+                            <textarea id="importSessionId" required rows="3"
+                                class="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 font-mono transition"
+                                placeholder="请输入有效的 Session ID (以 00D 开头)"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Remember Session Checkbox -->
+                    <div class="flex items-center">
+                        <input type="checkbox" id="sessionRemember" class="w-4 h-4 rounded border-slate-350 dark:border-slate-700 bg-white dark:bg-slate-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-white dark:focus:ring-offset-slate-900 cursor-pointer">
+                        <label for="sessionRemember" class="ml-2 text-xs font-semibold text-slate-600 dark:text-slate-400 cursor-pointer select-none">记住 Session 信息</label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" id="sessionSubmitBtn"
+                        class="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-lg shadow-emerald-600/10 hover:shadow-emerald-600/20 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition flex items-center justify-center space-x-2">
+                        <span id="sessionBtnText">立即导入登录</span>
+                        <div id="sessionBtnSpinner" class="hidden w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                     </button>
                 </form>
             </div>
@@ -2156,6 +2266,170 @@
             alert("已触发开始刷新数据处理（逻辑待后续补充）");
             appendLog("=== 【流程启动】开始刷新数据（暂无具体逻辑，待后续补充） ===", 'info');
         }
+
+        // Login Tabs switching logic
+        function switchLoginTab(tabType) {
+            const tabs = ['soap', 'sso', 'session'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`loginTabBtn-${t}`);
+                const form = t === 'soap' ? document.getElementById('loginForm') : 
+                             t === 'sso' ? document.getElementById('ssoLoginForm') : 
+                             document.getElementById('sessionLoginForm');
+                
+                if (t === tabType) {
+                    btn.className = "flex-1 pb-2 font-semibold text-blue-600 dark:text-blue-500 border-b-2 border-blue-600 dark:border-blue-500";
+                    form.classList.remove('hidden');
+                } else {
+                    btn.className = "flex-1 pb-2 font-semibold text-slate-500 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-700 dark:hover:text-slate-350";
+                    form.classList.add('hidden');
+                }
+            });
+            // Clear any error alert when switching tabs
+            document.getElementById('loginErrorAlert').classList.add('hidden');
+        }
+
+        // SSO Login Submit Handler
+        async function handleSsoLogin(event) {
+            event.preventDefault();
+            const loginUrl = document.getElementById('ssoLoginUrl').value.trim();
+            const clientId = document.getElementById('ssoClientId').value.trim();
+            const clientSecret = document.getElementById('ssoClientSecret').value.trim();
+            const ssoRemember = document.getElementById('ssoRemember').checked;
+            
+            if (ssoRemember) {
+                localStorage.setItem('sfdc_sso_url', loginUrl);
+                localStorage.setItem('sfdc_sso_client_id', clientId);
+                localStorage.setItem('sfdc_sso_client_secret', clientSecret);
+                localStorage.setItem('sfdc_sso_remember', 'true');
+            } else {
+                localStorage.removeItem('sfdc_sso_url');
+                localStorage.removeItem('sfdc_sso_client_id');
+                localStorage.removeItem('sfdc_sso_client_secret');
+                localStorage.setItem('sfdc_sso_remember', 'false');
+            }
+
+            try {
+                const response = await fetch('/api/oauth/url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        login_url: loginUrl,
+                        client_id: clientId,
+                        client_secret: clientSecret
+                    })
+                });
+                
+                const data = await response.json();
+                if (response.ok && data.success && data.auth_url) {
+                    // Redirect current window to Salesforce OAuth authorize page
+                    window.location.href = data.auth_url;
+                } else {
+                    const errorAlert = document.getElementById('loginErrorAlert');
+                    const errorMessage = document.getElementById('loginErrorMessage');
+                    errorAlert.classList.remove('hidden');
+                    errorMessage.textContent = data.error || '获取 OAuth 授权链接失败';
+                }
+            } catch (err) {
+                console.error("SSO 登录初始化失败", err);
+                const errorAlert = document.getElementById('loginErrorAlert');
+                const errorMessage = document.getElementById('loginErrorMessage');
+                errorAlert.classList.remove('hidden');
+                errorMessage.textContent = '网络错误：无法连接至后台服务构建授权链接';
+            }
+        }
+
+        // Session ID Import Submit Handler
+        async function handleSessionImport(event) {
+            event.preventDefault();
+            
+            const submitBtn = document.getElementById('sessionSubmitBtn');
+            const btnText = document.getElementById('sessionBtnText');
+            const btnSpinner = document.getElementById('sessionBtnSpinner');
+            const errorAlert = document.getElementById('loginErrorAlert');
+            const errorMessage = document.getElementById('loginErrorMessage');
+            
+            submitBtn.disabled = true;
+            btnText.textContent = "导入验证中...";
+            btnSpinner.classList.remove('hidden');
+            errorAlert.classList.add('hidden');
+            
+            const instanceUrl = document.getElementById('importInstanceUrl').value.trim();
+            const sessionId = document.getElementById('importSessionId').value.trim();
+            const sessionRemember = document.getElementById('sessionRemember').checked;
+            
+            if (sessionRemember) {
+                localStorage.setItem('sfdc_import_url', instanceUrl);
+                localStorage.setItem('sfdc_import_session_id', sessionId);
+                localStorage.setItem('sfdc_session_remember', 'true');
+            } else {
+                localStorage.removeItem('sfdc_import_url');
+                localStorage.removeItem('sfdc_import_session_id');
+                localStorage.setItem('sfdc_session_remember', 'false');
+            }
+            
+            try {
+                const response = await fetch('/api/session-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: sessionId,
+                        serverUrl: instanceUrl
+                    })
+                });
+                
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    sessionData = data;
+                    enterWorkspace();
+                } else {
+                    errorAlert.classList.remove('hidden');
+                    errorMessage.textContent = data.error || '验证 Session ID 失败，可能已过期';
+                }
+            } catch (err) {
+                console.error("Session 导入登录失败", err);
+                errorAlert.classList.remove('hidden');
+                errorMessage.textContent = '网络错误：无法连接至验证服务';
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = "立即导入登录";
+                btnSpinner.classList.add('hidden');
+            }
+        }
+
+        // Check if redirected back from SSO
+        function checkSsoRedirect() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('sso_success') === 'true') {
+                const sessionId = urlParams.get('sessionId');
+                const serverUrl = urlParams.get('serverUrl');
+                const userId = urlParams.get('userId');
+                const userFullName = urlParams.get('userFullName');
+                const userEmail = urlParams.get('userEmail');
+                const userName = urlParams.get('userName');
+                
+                if (sessionId && serverUrl) {
+                    sessionData = {
+                        success: true,
+                        sessionId: sessionId,
+                        serverUrl: serverUrl,
+                        userId: userId || "",
+                        userInfo: {
+                            userId: userId || "",
+                            userFullName: userFullName || "OAuth 用户",
+                            userEmail: userEmail || "oauth@company.com",
+                            userName: userName || ""
+                        }
+                    };
+                    
+                    // Clean URL query parameters
+                    const cleanUrl = window.location.origin + window.location.pathname;
+                    window.history.replaceState({}, document.title, cleanUrl);
+                    
+                    // Enter workspace
+                    enterWorkspace();
+                }
+            }
+        }
         
         // Initialize Remembered Credentials on startup
         function initRememberedCredentials() {
@@ -2176,10 +2450,41 @@
                 if (password) document.getElementById('password').value = password;
                 if (token) document.getElementById('securityToken').value = token;
             }
+
+            // Load remembered SSO config
+            const ssoRemember = localStorage.getItem('sfdc_sso_remember') === 'true';
+            const ssoRememberCheckbox = document.getElementById('ssoRemember');
+            if (ssoRememberCheckbox) ssoRememberCheckbox.checked = ssoRemember;
+            if (ssoRemember) {
+                const ssoUrl = localStorage.getItem('sfdc_sso_url');
+                const ssoClientId = localStorage.getItem('sfdc_sso_client_id');
+                const ssoClientSecret = localStorage.getItem('sfdc_sso_client_secret');
+                if (ssoUrl) document.getElementById('ssoLoginUrl').value = ssoUrl;
+                if (ssoClientId) document.getElementById('ssoClientId').value = ssoClientId;
+                if (ssoClientSecret) document.getElementById('ssoClientSecret').value = ssoClientSecret;
+            }
+
+            // Load remembered Session config
+            const sessionRemember = localStorage.getItem('sfdc_session_remember') === 'true';
+            const sessionRememberCheckbox = document.getElementById('sessionRemember');
+            if (sessionRememberCheckbox) sessionRememberCheckbox.checked = sessionRemember;
+            if (sessionRemember) {
+                const importUrl = localStorage.getItem('sfdc_import_url');
+                const importSessionId = localStorage.getItem('sfdc_import_session_id');
+                if (importUrl) document.getElementById('importInstanceUrl').value = importUrl;
+                if (importSessionId) document.getElementById('importSessionId').value = importSessionId;
+            }
+
+            // Populate Redirect URI dynamically
+            const redirectUriText = document.getElementById('ssoRedirectUriText');
+            if (redirectUriText) {
+                redirectUriText.textContent = window.location.origin + '/oauth/callback';
+            }
         }
 
         // Auto Login if credentials are saved in localStorage (never force re-login on refresh)
         async function autoLoginOnStartup() {
+            if (sessionData) return; // Already logged in (e.g. via SSO redirect)
             const remember = localStorage.getItem('sfdc_remember') === 'true';
             if (!remember) return;
             
@@ -2230,6 +2535,7 @@
         }
 
         // Run startup initializations
+        checkSsoRedirect();
         initRememberedCredentials();
         autoLoginOnStartup();
     </script>

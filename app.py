@@ -399,6 +399,206 @@ def login():
     except Exception as e:
         return jsonify({"success": False, "error": f"系统内部错误: {str(e)}"}), 500
 
+import uuid
+import urllib.parse
+
+OAUTH_PENDING_REQUESTS = {}
+
+@app.route('/api/session-login', methods=['POST'])
+def session_login():
+    data = request.json or {}
+    session_id = data.get('sessionId')
+    server_url = data.get('serverUrl')
+    
+    if not session_id or not server_url:
+        return jsonify({"success": False, "error": "Session ID 和 Server URL 不能为空"}), 400
+        
+    server_url = server_url.rstrip('/')
+    if '/services/Soap/u/' not in server_url:
+        soap_url = f"{server_url}/services/Soap/u/58.0"
+    else:
+        soap_url = server_url
+        server_url = server_url.split('/services/Soap/')[0]
+
+    soap_body = f"""<?xml version="1.0" encoding="utf-8" ?>
+<env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xmlns:env="http://schemas.xmlsoap.org/soap/envelope/">
+  <env:Header>
+    <SessionHeader xmlns="urn:partner.soap.sforce.com">
+      <sessionId>{session_id}</sessionId>
+    </SessionHeader>
+  </env:Header>
+  <env:Body>
+    <getUserInfo xmlns="urn:partner.soap.sforce.com"/>
+  </env:Body>
+</env:Envelope>"""
+
+    headers = {
+        "Content-Type": "text/xml; charset=UTF-8",
+        "SOAPAction": "getUserInfo"
+    }
+
+    try:
+        response = requests.post(soap_url, data=soap_body.encode('utf-8'), headers=headers, timeout=20)
+        try:
+            root = ET.fromstring(response.content)
+        except Exception as parse_err:
+            return jsonify({
+                "success": False, 
+                "error": f"解析服务响应 XML 失败，HTTP 状态码: {response.status_code}. 错误: {str(parse_err)}"
+            }), 500
+
+        def find_elem(element, tag_name):
+            for elem in element.iter():
+                if elem.tag.split('}')[-1] == tag_name:
+                    return elem
+            return None
+
+        fault = find_elem(root, 'Fault')
+        if fault is not None:
+            faultstring_elem = find_elem(fault, 'faultstring')
+            faultstring = faultstring_elem.text if faultstring_elem is not None else "未知 SOAP 错误"
+            return jsonify({"success": False, "error": faultstring}), 400
+
+        result_elem = find_elem(root, 'result')
+        if result_elem is not None:
+            user_info = {}
+            for child in result_elem:
+                tag = child.tag.split('}')[-1]
+                user_info[tag] = child.text
+            
+            user_id = user_info.get('userId', '')
+            
+            return jsonify({
+                "success": True,
+                "sessionId": session_id,
+                "serverUrl": server_url,
+                "userId": user_id,
+                "userInfo": {
+                    "userId": user_id,
+                    "userFullName": user_info.get('userFullName', 'Session 用户'),
+                    "userEmail": user_info.get('userEmail', 'session@company.com'),
+                    "userName": user_info.get('userName', '')
+                }
+            })
+        else:
+            return jsonify({"success": False, "error": "验证 Session ID 失败：未能获取用户信息"}), 400
+
+    except requests.exceptions.RequestException as req_err:
+        return jsonify({"success": False, "error": f"网络请求失败: {str(req_err)}"}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": f"验证 Session ID 失败: {str(e)}"}), 500
+
+
+@app.route('/api/oauth/url', methods=['POST'])
+def oauth_url():
+    data = request.json or {}
+    login_url = data.get('login_url', '').rstrip('/')
+    client_id = data.get('client_id', '').strip()
+    client_secret = data.get('client_secret', '').strip()
+    
+    if not login_url or not client_id:
+        return jsonify({"success": False, "error": "登录地址和 Client ID 不能为空"}), 400
+        
+    state = str(uuid.uuid4())
+    redirect_uri = request.host_url.rstrip('/') + '/oauth/callback'
+    
+    OAUTH_PENDING_REQUESTS[state] = {
+        "login_url": login_url,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri
+    }
+    
+    auth_url = f"{login_url}/services/oauth2/authorize?response_type=code&client_id={client_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&state={state}"
+    
+    return jsonify({
+        "success": True,
+        "auth_url": auth_url
+    })
+
+
+@app.route('/oauth/callback')
+def oauth_callback():
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description')
+    
+    if error:
+        err_msg = f"OAuth 授权错误: {error} - {error_description}"
+        return f"<h3>登录授权失败</h3><p>{err_msg}</p><a href='/'>返回登录页</a>", 400
+        
+    if not code or not state:
+        return "<h3>登录授权失败</h3><p>缺少必要的 authorization code 或 state 参数</p><a href='/'>返回登录页</a>", 400
+        
+    req_info = OAUTH_PENDING_REQUESTS.pop(state, None)
+    if not req_info:
+        return "<h3>登录授权失败</h3><p>无效或已过期的 state 会话</p><a href='/'>返回登录页</a>", 400
+        
+    login_url = req_info["login_url"]
+    client_id = req_info["client_id"]
+    client_secret = req_info["client_secret"]
+    redirect_uri = req_info["redirect_uri"]
+    
+    token_url = f"{login_url}/services/oauth2/token"
+    payload = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri
+    }
+    
+    try:
+        res = requests.post(token_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=20)
+        if res.status_code != 200:
+            err_data = res.json() if res.headers.get('Content-Type', '').startswith('application/json') else {}
+            err_msg = err_data.get('error_description', res.text)
+            return f"<h3>向 Salesforce 交换 Token 失败</h3><p>{err_msg}</p><a href='/'>返回登录页</a>", 400
+            
+        token_data = res.json()
+        access_token = token_data.get("access_token")
+        instance_url = token_data.get("instance_url")
+        id_url = token_data.get("id")
+        
+        userinfo_data = {}
+        if id_url:
+            userinfo_res = requests.get(id_url, headers={"Authorization": f"Bearer {access_token}"}, timeout=10)
+            if userinfo_res.status_code == 200:
+                userinfo_data = userinfo_res.json()
+                
+        user_fullname = userinfo_data.get("display_name", "OAuth 用户")
+        user_email = userinfo_data.get("email", "oauth@company.com")
+        username = userinfo_data.get("username", "")
+        user_id = userinfo_data.get("user_id", "")
+        
+        params = {
+            "sso_success": "true",
+            "sessionId": access_token,
+            "serverUrl": instance_url,
+            "userId": user_id,
+            "userFullName": user_fullname,
+            "userEmail": user_email,
+            "userName": username
+        }
+        
+        redirect_target = f"/?{urllib.parse.urlencode(params)}"
+        return f"""
+        <html>
+        <head><title>登录成功，正在跳转...</title></head>
+        <body>
+            <p>登录成功！正在跳转回工作台...</p>
+            <script>
+                window.location.href = "{redirect_target}";
+            </script>
+        </body>
+        </html>
+        """
+    except Exception as e:
+        return f"<h3>系统内部错误</h3><p>{str(e)}</p><a href='/'>返回登录页</a>", 500
+
 # Backup file tree endpoints
 @app.route('/api/backup', methods=['POST'])
 def perform_backup():
