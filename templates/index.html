@@ -70,6 +70,24 @@
             border-left: 4px solid #6366f1 !important;
             box-shadow: inset 4px 0 8px -2px rgba(99, 102, 241, 0.3);
         }
+        /* Ripple effect stylesheet rules */
+        .ripple {
+            position: absolute;
+            border-radius: 50%;
+            transform: scale(0);
+            animation: ripple-animation 0.6s linear;
+            background-color: rgba(255, 255, 255, 0.4);
+            pointer-events: none;
+        }
+        .ripple-dark {
+            background-color: rgba(0, 0, 0, 0.15);
+        }
+        @keyframes ripple-animation {
+            to {
+                transform: scale(4);
+                opacity: 0;
+            }
+        }
     </style>
 </head>
 <body class="bg-gradient-to-br from-slate-50 via-slate-100 to-indigo-50 dark:from-slate-900 dark:via-slate-950 dark:to-slate-900 h-screen flex flex-col justify-between overflow-hidden transition-colors duration-200">
@@ -518,6 +536,8 @@
                                             <th class="px-6 py-3.5 w-1/4">子任务名称</th>
                                             <th class="px-6 py-3.5 w-1/6">拆分数据量</th>
                                             <th class="px-6 py-3.5 w-1/6">是否备份完成</th>
+                                            <th class="px-6 py-3.5 w-1/12 text-center">更新成功条数</th>
+                                            <th class="px-6 py-3.5 w-1/12 text-center">失败条数</th>
                                             <th class="px-6 py-3.5 w-1/6 text-center">是否执行</th>
                                             <th class="px-6 py-3.5 w-1/4 text-center">操作</th>
                                         </tr>
@@ -794,6 +814,45 @@
         let tasksConfig = {};
         let sessionData = null;
 
+        // Dynamic water ripple effect on button clicks
+        document.addEventListener('click', function (e) {
+            const button = e.target.closest('button, .ripple-btn');
+            if (!button || button.disabled) return;
+
+            const rect = button.getBoundingClientRect();
+            const ripple = document.createElement('span');
+            
+            const style = window.getComputedStyle(button);
+            if (style.position === 'static') {
+                button.style.position = 'relative';
+            }
+            if (style.overflow !== 'hidden') {
+                button.style.overflow = 'hidden';
+            }
+
+            const size = Math.max(rect.width, rect.height);
+            ripple.style.width = ripple.style.height = `${size}px`;
+            
+            const x = e.clientX - rect.left - size / 2;
+            const y = e.clientY - rect.top - size / 2;
+            
+            ripple.style.left = `${x}px`;
+            ripple.style.top = `${y}px`;
+            
+            const bg = style.backgroundColor;
+            let isLightBg = false;
+            if (bg.includes('rgba(0, 0, 0, 0)') || bg === 'transparent' || bg.includes('255, 255, 255') || bg.includes('248, 250, 252') || bg.includes('241, 245, 249') || bg.includes('254, 243, 199') || bg.includes('253, 242, 248') || bg.includes('254, 252, 232') || bg.includes('240, 253, 244') || bg.includes('239, 246, 255')) {
+                isLightBg = true;
+            }
+            
+            ripple.className = isLightBg ? 'ripple ripple-dark' : 'ripple';
+            button.appendChild(ripple);
+            
+            ripple.addEventListener('animationend', () => {
+                ripple.remove();
+            });
+        });
+
         // Enforce strict ordering of subtasks: User (1st), Customer/Account (2nd), Inquiry/XX (3rd)
         function getOrderedTasks(tasks) {
             const order = ['user', 'account', 'customer', 'inquiry', 'xx'];
@@ -1068,6 +1127,12 @@
                     <td class="px-6 py-4 font-mono text-slate-650 dark:text-slate-300 font-medium">${task.count}</td>
                     <td class="px-6 py-4">
                         ${backupStatusBadge}
+                    </td>
+                    <td class="px-6 py-4 text-center font-mono text-slate-650 dark:text-slate-300 font-medium">
+                        ${task.successCount || 0}条
+                    </td>
+                    <td class="px-6 py-4 text-center font-mono text-slate-650 dark:text-slate-300 font-medium text-red-500 dark:text-red-400">
+                        ${task.failCount || 0}条
                     </td>
                     <td class="px-6 py-4 text-center">
                         <label class="relative inline-flex items-center ${cursorClass}">
@@ -2247,24 +2312,152 @@
             loadBackupTree();
         }
 
-        // Placeholder for subtask data update
-        function updateSingleTask(key) {
+        // Subtask data update triggered manually from row Action button
+        async function updateSingleTask(key) {
+            const record = masterRecords[selectedRecordIndex];
             const task = tasksConfig[key];
-            alert(`已触发子任务 [${task.name}] 数据更新（逻辑待后续补充）`);
-            appendLog(`[手动触发] 子任务 [${task.name}] 数据更新触发（暂无具体逻辑，待后续补充）`, 'info');
+            if (!task) return;
+
+            // Set running state and render
+            task.runState = 'running';
+            renderDetailSubtasksTable();
+            renderTable();
+
+            appendLog(`[手动触发] 开始为子任务 [${task.name}] 执行数据更新...`, 'info');
+
+            try {
+                const response = await fetch('/api/subtask/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bu_config_id: record.id || record.name,
+                        subtask_key: task.key,
+                        sessionId: sessionData ? sessionData.sessionId : null,
+                        serverUrl: sessionData ? sessionData.serverUrl : null
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    task.successCount = data.successCount;
+                    task.failCount = data.failCount;
+                    task.runState = data.failCount === 0 ? 'success' : 'failed';
+                    
+                    if (data.failCount > 0) {
+                        appendLog(`[手动触发] 子任务 [${task.name}] 数据更新完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。请核对失败原因。`, 'warning');
+                    } else {
+                        appendLog(`[手动触发] 子任务 [${task.name}] 数据更新全部成功！更新记录数: ${data.successCount}条。`, 'success');
+                    }
+                } else {
+                    task.runState = 'failed';
+                    appendLog(`[手动触发] 子任务 [${task.name}] 数据更新失败: ${data.error || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                task.runState = 'failed';
+                appendLog(`[手动触发] 子任务 [${task.name}] 数据更新异常：网络连接问题`, 'error');
+            }
+
+            renderDetailSubtasksTable();
+            renderTable();
         }
 
-        // Placeholder for subtask retry logic
-        function retrySingleTask(key) {
+        // Subtask retry logic for failed updates
+        async function retrySingleTask(key) {
+            const record = masterRecords[selectedRecordIndex];
             const task = tasksConfig[key];
-            alert(`已触发子任务 [${task.name}] 重试（逻辑待后续补充）`);
-            appendLog(`[手动触发] 子任务 [${task.name}] 重试触发（暂无具体逻辑，待后续补充）`, 'info');
+            if (!task) return;
+
+            task.runState = 'running';
+            renderDetailSubtasksTable();
+            renderTable();
+
+            appendLog(`[手动触发] 正在重新尝试子任务 [${task.name}] 失败记录的更新...`, 'info');
+
+            try {
+                const response = await fetch('/api/subtask/retry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bu_config_id: record.id || record.name,
+                        subtask_key: task.key
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    task.successCount = data.successCount;
+                    task.failCount = data.failCount;
+                    task.runState = data.failCount === 0 ? 'success' : 'failed';
+                    appendLog(`[手动触发] 子任务 [${task.name}] 重试成功！修复 ${data.retriedCount}条 失败记录。当前成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'success');
+                } else {
+                    task.runState = 'failed';
+                    appendLog(`[手动触发] 子任务 [${task.name}] 重试更新失败: ${data.error || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                task.runState = 'failed';
+                appendLog(`[手动触发] 子任务 [${task.name}] 重试更新异常：网络连接问题`, 'error');
+            }
+
+            renderDetailSubtasksTable();
+            renderTable();
         }
 
-        // Trigger the refresh workflow from the configuration page
-        function runDataRefreshProcess() {
-            alert("已触发开始刷新数据处理（逻辑待后续补充）");
-            appendLog("=== 【流程启动】开始刷新数据（暂无具体逻辑，待后续补充） ===", 'info');
+        // Trigger the refresh/update workflow for all checked subtasks
+        async function runDataRefreshProcess() {
+            const record = masterRecords[selectedRecordIndex];
+            appendLog(`=== 【流程启动】开始执行主数据 [${record.name}] 的数据刷新与更新流程 ===`, 'info');
+
+            let activeTasks = getOrderedTasks(tasksConfig).filter(t => t.execute);
+            if (activeTasks.length === 0) {
+                appendLog("没有选择任何可执行的子任务，刷新中止。", 'warning');
+                return;
+            }
+
+            for (const task of activeTasks) {
+                // Highlight the active task in list
+                task.runState = 'running';
+                renderDetailSubtasksTable();
+                renderTable();
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                appendLog(`正在执行子任务 [${task.name}] 的数据更新刷新流程...`, 'info');
+
+                try {
+                    const response = await fetch('/api/subtask/update', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            bu_config_id: record.id || record.name,
+                            subtask_key: task.key,
+                            sessionId: sessionData ? sessionData.sessionId : null,
+                            serverUrl: sessionData ? sessionData.serverUrl : null
+                        })
+                    });
+                    const data = await response.json();
+                    if (response.ok && data.success) {
+                        task.successCount = data.successCount;
+                        task.failCount = data.failCount;
+                        task.runState = data.failCount === 0 ? 'success' : 'failed';
+                        if (data.failCount > 0) {
+                            appendLog(`子任务 [${task.name}] 更新完成，部分失败。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'warning');
+                        } else {
+                            appendLog(`子任务 [${task.name}] 更新全部成功！成功: ${data.successCount}条。`, 'success');
+                        }
+                    } else {
+                        task.runState = 'failed';
+                        appendLog(`子任务 [${task.name}] 更新失败: ${data.error || '未知错误'}`, 'error');
+                    }
+                } catch (e) {
+                    task.runState = 'failed';
+                    appendLog(`子任务 [${task.name}] 更新网络连接异常`, 'error');
+                }
+                
+                renderDetailSubtasksTable();
+                renderTable();
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+
+            appendLog(`=== 主数据 [${record.name}] 数据刷新流程执行完毕 ===`, 'success');
+            renderTable();
+            renderDetailSubtasksTable();
         }
 
         // Login Tabs switching logic

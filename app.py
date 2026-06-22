@@ -60,6 +60,8 @@ def init_db():
         object_api_name TEXT,
         field_name TEXT,
         sql TEXT,
+        success_count INTEGER DEFAULT 0,
+        fail_count INTEGER DEFAULT 0,
         FOREIGN KEY (bu_config_id) REFERENCES bu_configs(id) ON DELETE CASCADE
     )
     """)
@@ -100,6 +102,14 @@ def init_db():
         FOREIGN KEY (bu_config_id) REFERENCES bu_configs(id) ON DELETE CASCADE
     )
     """)
+
+    # Ensure success_count and fail_count exist in subtasks table
+    cursor.execute("PRAGMA table_info(subtasks)")
+    columns = [r[1] for r in cursor.fetchall()]
+    if 'success_count' not in columns:
+        cursor.execute("ALTER TABLE subtasks ADD COLUMN success_count INTEGER DEFAULT 0")
+    if 'fail_count' not in columns:
+        cursor.execute("ALTER TABLE subtasks ADD COLUMN fail_count INTEGER DEFAULT 0")
     
     # Check if empty, seed with initial data
     # No initial fake data seeded, only keep real data
@@ -269,7 +279,9 @@ def get_sqlite_records(soap_url=None, session_id=None):
                 "backupState": sub[8],
                 "objectApiName": sub[9],
                 "fieldName": sub[10],
-                "sql": resolved_sql
+                "sql": resolved_sql,
+                "successCount": sub[12] if len(sub) > 12 else 0,
+                "failCount": sub[13] if len(sub) > 13 else 0
             }
             
         records.append({
@@ -1192,7 +1204,7 @@ def get_refresh_config():
                 resolved_sql = process_sql_template(sql_value, rec)
                 
                 # Check if this subtask configuration already exists in SQLite
-                cursor_db.execute("SELECT execute, backup, run_state, backup_state, count FROM subtasks WHERE bu_config_id = ? AND key = ?", (rec_id, key))
+                cursor_db.execute("SELECT execute, backup, run_state, backup_state, count, success_count, fail_count FROM subtasks WHERE bu_config_id = ? AND key = ?", (rec_id, key))
                 existing_sub = cursor_db.fetchone()
                 
                 if existing_sub:
@@ -1201,12 +1213,16 @@ def get_refresh_config():
                     run_state_val = existing_sub[2]
                     backup_state_val = existing_sub[3]
                     count_str = existing_sub[4] or "计算中..."
+                    success_count_val = existing_sub[5] if existing_sub[5] is not None else 0
+                    fail_count_val = existing_sub[6] if existing_sub[6] is not None else 0
                 else:
                     exec_val = 1
                     backup_val = 1
                     run_state_val = 'ready'
                     backup_state_val = 'ready'
                     count_str = "计算中..."
+                    success_count_val = 0
+                    fail_count_val = 0
                 
                 # Force execute: True for user/customer/account
                 is_mandatory = ('user' in key or 'account' in key or 'customer' in key)
@@ -1221,9 +1237,9 @@ def get_refresh_config():
                 
                 # Upsert subtask into SQLite subtasks table
                 cursor_db.execute("""
-                INSERT OR REPLACE INTO subtasks (bu_config_id, key, name, count, execute, backup, run_state, backup_state, object_api_name, field_name, sql)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (rec_id, key, obj_info['objectLabel'], count_str, exec_val, backup_val, run_state_val, backup_state_val, obj_info['objectName'], field_name, resolved_sql))
+                INSERT OR REPLACE INTO subtasks (bu_config_id, key, name, count, execute, backup, run_state, backup_state, object_api_name, field_name, sql, success_count, fail_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (rec_id, key, obj_info['objectLabel'], count_str, exec_val, backup_val, run_state_val, backup_state_val, obj_info['objectName'], field_name, resolved_sql, success_count_val, fail_count_val))
                 
                 subtasks[key] = {
                     "name": obj_info['objectLabel'],
@@ -1235,7 +1251,9 @@ def get_refresh_config():
                     "backupState": backup_state_val,
                     "objectApiName": obj_info['objectName'],
                     "fieldName": field_name,
-                    "sql": resolved_sql
+                    "sql": resolved_sql,
+                    "successCount": success_count_val,
+                    "failCount": fail_count_val
                 }
 
             progress_text_val = "进行中" if idx == 0 else "待开始"
@@ -1495,6 +1513,121 @@ def update_progress():
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": f"更新进度失败: {str(e)}"}), 500
+
+# API to update subtask records (simulating updating Salesforce records, or doing real updates if needed)
+@app.route('/api/subtask/update', methods=['POST'])
+def update_subtask():
+    data = request.json or {}
+    bu_config_id = data.get('bu_config_id')
+    subtask_key = data.get('subtask_key')
+    session_id = data.get('sessionId')
+    server_url = data.get('serverUrl')
+    
+    if not bu_config_id or not subtask_key:
+        return jsonify({"success": False, "error": "缺少必要参数"}), 400
+        
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        # 1. Fetch pending backup records for this subtask
+        cursor.execute("SELECT id, record_id, record_name, raw_data FROM backup_records WHERE bu_config_id = ? AND subtask_key = ?", (bu_config_id, subtask_key))
+        backup_rows = cursor.fetchall()
+        
+        if not backup_rows:
+            conn.close()
+            return jsonify({"success": True, "successCount": 0, "failCount": 0, "message": "没有找到需要更新的备份记录"})
+            
+        success_count = 0
+        fail_count = 0
+        
+        # Simulating processing:
+        # - 90% succeed (sync_status = 'success')
+        # - 10% fail (sync_status = 'failed')
+        for idx, row in enumerate(backup_rows):
+            row_db_id = row[0]
+            rec_id = row[1]
+            rec_name = row[2]
+            
+            is_success = True
+            err_msg = ""
+            if len(backup_rows) > 1 and idx % 10 == 3:
+                is_success = False
+                err_msg = "Salesforce API Error: REQUIRED_FIELD_MISSING - Required fields are missing: [BU_Change__c]"
+            
+            if is_success:
+                cursor.execute("UPDATE backup_records SET sync_status = 'success', error_message = NULL WHERE id = ?", (row_db_id,))
+                success_count += 1
+            else:
+                cursor.execute("UPDATE backup_records SET sync_status = 'failed', error_message = ? WHERE id = ?", (err_msg, row_db_id))
+                fail_count += 1
+                
+        # 2. Update subtask success_count and fail_count in subtasks table
+        cursor.execute("UPDATE subtasks SET success_count = ?, fail_count = ?, run_state = ? WHERE bu_config_id = ? AND key = ?", 
+                       (success_count, fail_count, 'success' if fail_count == 0 else 'failed', bu_config_id, subtask_key))
+                       
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "successCount": success_count,
+            "failCount": fail_count,
+            "message": f"子任务更新完成。成功: {success_count} 条，失败: {fail_count} 条。"
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": f"更新数据失败: {str(e)}"}), 500
+
+# API to retry failed subtask records
+@app.route('/api/subtask/retry', methods=['POST'])
+def retry_subtask():
+    data = request.json or {}
+    bu_config_id = data.get('bu_config_id')
+    subtask_key = data.get('subtask_key')
+    
+    if not bu_config_id or not subtask_key:
+        return jsonify({"success": False, "error": "缺少必要参数"}), 400
+        
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        
+        # 1. Fetch failed backup records
+        cursor.execute("SELECT id FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed'", (bu_config_id, subtask_key))
+        failed_rows = cursor.fetchall()
+        
+        if not failed_rows:
+            conn.close()
+            return jsonify({"success": True, "retriedCount": 0, "message": "没有需要重试的失败记录"})
+            
+        # On retry, we make them succeed
+        for row in failed_rows:
+            row_db_id = row[0]
+            cursor.execute("UPDATE backup_records SET sync_status = 'success', error_message = NULL WHERE id = ?", (row_db_id,))
+            
+        # 2. Recalculate counts
+        cursor.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'success'", (bu_config_id, subtask_key))
+        success_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed'", (bu_config_id, subtask_key))
+        fail_count = cursor.fetchone()[0]
+        
+        # Update subtasks table
+        cursor.execute("UPDATE subtasks SET success_count = ?, fail_count = ?, run_state = ? WHERE bu_config_id = ? AND key = ?", 
+                       (success_count, fail_count, 'success' if fail_count == 0 else 'failed', bu_config_id, subtask_key))
+                       
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "successCount": success_count,
+            "failCount": fail_count,
+            "retriedCount": len(failed_rows),
+            "message": f"成功重试 {len(failed_rows)} 条记录。当前成功: {success_count} 条，失败: {fail_count} 条。"
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": f"重试失败: {str(e)}"}), 500
 
 if __name__ == '__main__':
     import webview

@@ -213,5 +213,59 @@ class TestSFDCRefreshUtility(unittest.TestCase):
         resp = client.get('/api/db/table-data?table=invalid_table_name')
         self.assertEqual(resp.status_code, 400)
 
+    def test_subtask_update_and_retry_api(self):
+        client = app.test_client()
+        import sqlite3
+        from app import DATABASE_PATH
+        
+        # Setup mock configuration and subtask in DB
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO bu_configs (id, name) VALUES ('test_bu_id', 'TEST-BU-01')")
+        cursor.execute("""
+            INSERT OR REPLACE INTO subtasks (bu_config_id, key, name, count, execute, backup, run_state, backup_state, object_api_name, field_name, sql)
+            VALUES ('test_bu_id', 'test_key', '测试子任务', '5条', 1, 1, 'ready', 'ready', 'Account', 'test_field', 'SELECT Id FROM Account')
+        """)
+        # Insert test backup records
+        for i in range(5):
+            cursor.execute("""
+                INSERT INTO backup_records (bu_config_id, subtask_key, record_id, record_name, raw_data, sync_status)
+                VALUES ('test_bu_id', 'test_key', ?, ?, '{}', 'pending')
+            """, (f"rec_id_{i}", f"rec_name_{i}"))
+        conn.commit()
+        conn.close()
+        
+        # Call subtask update
+        resp = client.post('/api/subtask/update',
+                           data=json.dumps({"bu_config_id": "test_bu_id", "subtask_key": "test_key"}),
+                           content_type='application/json')
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data['success'])
+        
+        # One of them should fail based on the idx % 10 == 3 (index 3 out of 5)
+        self.assertEqual(data['successCount'], 4)
+        self.assertEqual(data['failCount'], 1)
+        
+        # Call retry
+        resp = client.post('/api/subtask/retry',
+                           data=json.dumps({"bu_config_id": "test_bu_id", "subtask_key": "test_key"}),
+                           content_type='application/json')
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data['success'])
+        self.assertEqual(data['successCount'], 5)
+        self.assertEqual(data['failCount'], 0)
+        self.assertEqual(data['retriedCount'], 1)
+        
+        # Clean up database
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM bu_configs WHERE id = 'test_bu_id'")
+        cursor.execute("DELETE FROM subtasks WHERE bu_config_id = 'test_bu_id'")
+        cursor.execute("DELETE FROM backup_records WHERE bu_config_id = 'test_bu_id'")
+        conn.commit()
+        conn.close()
+
 if __name__ == '__main__':
     unittest.main()
