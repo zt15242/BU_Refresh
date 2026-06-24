@@ -2232,6 +2232,47 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
         fields_xml = []
         fields_to_null = []
         
+        # For Opportunity, map the lastmonth fields before clearing
+        if subtask_key == 'opportunity':
+            bu_c = ""
+            community_c = ""
+            region_c = ""
+            prov_name = ""
+            
+            for k_orig, v_orig in r.items():
+                kl = k_orig.lower()
+                if kl == 'bu__c' and v_orig:
+                    bu_c = str(v_orig)
+                elif kl == 'community__c' and v_orig:
+                    community_c = str(v_orig)
+                elif kl == 'region__c' and v_orig:
+                    region_c = str(v_orig)
+                elif kl == 'bu_province__r' and v_orig:
+                    if isinstance(v_orig, dict):
+                        prov_name = str(v_orig.get('Name', v_orig.get('name', '')))
+                    else:
+                        prov_name = str(v_orig)
+            
+            if prov_name:
+                fields_xml.append(f"<sf:BU_province_lastmonth__c>{html.escape(prov_name)}</sf:BU_province_lastmonth__c>")
+            else:
+                fields_to_null.append("BU_province_lastmonth__c")
+                
+            if bu_c:
+                fields_xml.append(f"<sf:BU_lastmonth__c>{html.escape(bu_c)}</sf:BU_lastmonth__c>")
+            else:
+                fields_to_null.append("BU_lastmonth__c")
+                
+            if community_c:
+                fields_xml.append(f"<sf:Community_lastmonth__c>{html.escape(community_c)}</sf:Community_lastmonth__c>")
+            else:
+                fields_to_null.append("Community_lastmonth__c")
+                
+            if region_c:
+                fields_xml.append(f"<sf:Region_lastmonth__c>{html.escape(region_c)}</sf:Region_lastmonth__c>")
+            else:
+                fields_to_null.append("Region_lastmonth__c")
+        
         for k, v in r.items():
             kl = k.lower()
             # Skip system/read-only fields
@@ -2248,6 +2289,10 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
                 
             # For Opportunity: Skip Opportunity_Category__c (no processing, no nulling)
             if subtask_key == 'opportunity' and kl == 'opportunity_category__c':
+                continue
+                
+            # Skip the custom mapped lastmonth fields to prevent duplicates
+            if subtask_key == 'opportunity' and kl in ['bu_province_lastmonth__c', 'bu_lastmonth__c', 'community_lastmonth__c', 'region_lastmonth__c']:
                 continue
             
             # Check if it should be cleared
