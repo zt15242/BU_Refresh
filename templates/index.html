@@ -2765,7 +2765,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         bu_config_id: record.id || record.name,
-                        subtask_key: task.key
+                        subtask_key: task.key,
+                        sessionId: sessionData ? sessionData.sessionId : null,
+                        serverUrl: sessionData ? sessionData.serverUrl : null
                     })
                 });
                 const data = await response.json();

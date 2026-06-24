@@ -3141,6 +3141,8 @@ def pause_subtask():
     data = request.json or {}
     bu_config_id = data.get('bu_config_id')
     subtask_key = data.get('subtask_key')
+    session_id = data.get('sessionId')
+    server_url = data.get('serverUrl')
     
     if not bu_config_id or not subtask_key:
         return jsonify({"success": False, "error": "缺少必要参数"}), 400
@@ -3152,6 +3154,10 @@ def pause_subtask():
         PAUSE_CONTROL[pause_key] = {}
     PAUSE_CONTROL[pause_key]['paused'] = True
     
+    # 若为询价对象(opportunity)，暂停时将标签恢复为 true (原值)
+    if subtask_key == 'opportunity' and session_id and server_url:
+        update_custom_label(server_url, session_id, 'opportunityCTOM', 'true')
+        
     try:
         with db_conn() as conn:
             cursor = conn.cursor()
@@ -3161,7 +3167,7 @@ def pause_subtask():
     except Exception as e:
         print(f"Failed to update db state to paused: {e}")
         
-    return jsonify({"success": True, "message": "暂停指令已生效"})
+    return jsonify({"success": True, "message": "暂停指令已生效，标签已还原"})
 
 # API to resume subtask update (继续就是重新调用update)
 @app.route('/api/subtask/resume', methods=['POST'])
