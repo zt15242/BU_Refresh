@@ -267,5 +267,201 @@ class TestSFDCRefreshUtility(unittest.TestCase):
         conn.commit()
         conn.close()
 
+    @patch('requests.post')
+    def test_subtask_real_update_batch_limit(self, mock_post):
+        client = app.test_client()
+        import sqlite3
+        from app import DATABASE_PATH
+        
+        # Cleanup any leftover test data first
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM bu_configs WHERE id = 'real_test_bu_id'")
+        cursor.execute("DELETE FROM subtasks WHERE bu_config_id = 'real_test_bu_id'")
+        cursor.execute("DELETE FROM backup_records WHERE bu_config_id = 'real_test_bu_id'")
+        conn.commit()
+        
+        # Setup mock configuration and subtask in DB
+        cursor.execute("INSERT OR REPLACE INTO bu_configs (id, name) VALUES ('real_test_bu_id', 'TEST-BU-02')")
+        cursor.execute("""
+            INSERT OR REPLACE INTO subtasks (bu_config_id, key, name, count, execute, backup, run_state, backup_state, object_api_name, field_name, sql)
+            VALUES ('real_test_bu_id', 'user', '用户', '10条', 1, 1, 'ready', 'ready', 'User', 'user_sql__c', 'SELECT Id FROM User')
+        """)
+        # Insert 10 test backup records
+        for i in range(10):
+            raw_data = json.dumps({
+                "Id": f"rec_id_{i}",
+                "Name": f"User {i}",
+                "BU__c": "OldBU",
+                "User_BU__c": "NewBU",
+                "BU_Province_ID__c": "OldID",
+                "BU_Province_Text__c": "OldText",
+                "Community__c": "OldComm",
+                "ProvinceBU__c": "OldProvBU",
+                "Region__c": "North"
+            })
+            cursor.execute("""
+                INSERT INTO backup_records (bu_config_id, subtask_key, record_id, record_name, raw_data, sync_status)
+                VALUES ('real_test_bu_id', 'user', ?, ?, ?, 'pending')
+            """, (f"rec_id_{i}", f"rec_name_{i}", raw_data))
+        conn.commit()
+        conn.close()
+        
+        # Mock successful SOAP update response
+        mock_res = MagicMock()
+        mock_res.status_code = 200
+        mock_res.content = b"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns="urn:partner.soap.sforce.com">
+   <soapenv:Body>
+      <updateResponse>
+         <result>
+            <id>mock_id</id>
+            <success>true</success>
+         </result>
+      </updateResponse>
+   </soapenv:Body>
+</soapenv:Envelope>"""
+        mock_post.return_value = mock_res
+        
+        # Call subtask update
+        resp = client.post('/api/subtask/update',
+                           data=json.dumps({
+                               "bu_config_id": "real_test_bu_id", 
+                               "subtask_key": "user",
+                               "sessionId": "mock_session_id",
+                               "serverUrl": "https://test.salesforce.com"
+                           }),
+                           content_type='application/json')
+        
+        self.assertEqual(resp.status_code, 200)
+        data = json.loads(resp.data)
+        self.assertTrue(data['success'])
+        
+        # All 10 records should succeed
+        self.assertEqual(data['successCount'], 10)
+        self.assertEqual(data['failCount'], 0)
+        
+        # Verify call counts: mock_post should be called exactly 10 times
+        self.assertEqual(mock_post.call_count, 10)
+        
+        # Check payload in the first call
+        first_call_args, first_call_kwargs = mock_post.call_args_list[0]
+        payload_data = first_call_kwargs['data'].decode('utf-8')
+        
+        # Verify 5 fields to nullify are present in <fieldsToNull>
+        self.assertIn("<sf:fieldsToNull>BU_Province_ID__c</sf:fieldsToNull>", payload_data)
+        self.assertIn("<sf:fieldsToNull>BU_Province_Text__c</sf:fieldsToNull>", payload_data)
+        self.assertIn("<sf:fieldsToNull>BU__c</sf:fieldsToNull>", payload_data)
+        self.assertIn("<sf:fieldsToNull>Community__c</sf:fieldsToNull>", payload_data)
+        self.assertIn("<sf:fieldsToNull>ProvinceBU__c</sf:fieldsToNull>", payload_data)
+        
+        # Verify other fields are sent as values
+        self.assertIn("<sf:User_BU__c>NewBU</sf:User_BU__c>", payload_data)
+        self.assertIn("<sf:Region__c>North</sf:Region__c>", payload_data)
+        
+        # Verify the backup raw_data in SQLite remained unmodified (not cleared)
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT raw_data FROM backup_records WHERE bu_config_id = 'real_test_bu_id' AND subtask_key = 'user'")
+        rows = cursor.fetchall()
+        for r in rows:
+            record_dict = json.loads(r[0])
+            self.assertEqual(record_dict["BU__c"], "OldBU")
+            self.assertEqual(record_dict["BU_Province_ID__c"], "OldID")
+            self.assertEqual(record_dict["BU_Province_Text__c"], "OldText")
+            self.assertEqual(record_dict["Community__c"], "OldComm")
+            self.assertEqual(record_dict["ProvinceBU__c"], "OldProvBU")
+        
+        # Clean up database
+        cursor.execute("DELETE FROM bu_configs WHERE id = 'real_test_bu_id'")
+        cursor.execute("DELETE FROM subtasks WHERE bu_config_id = 'real_test_bu_id'")
+        cursor.execute("DELETE FROM backup_records WHERE bu_config_id = 'real_test_bu_id'")
+        conn.commit()
+        conn.close()
+
+class TestSFDCRequestLogger(unittest.TestCase):
+    def test_log_sfdc_request_and_sanitize(self):
+        import sqlite3
+        import time
+        from app import DATABASE_PATH, log_sfdc_request
+        
+        # Test clean up first
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM sfdc_request_logs")
+        conn.commit()
+        
+        # Inputs containing sensitive details
+        url = "https://test.salesforce.com/services/Soap/u/58.0"
+        method = "POST"
+        headers = {
+            "Content-Type": "text/xml; charset=UTF-8",
+            "Authorization": "Bearer super_secret_token",
+            "sessionId": "sensitive_session_id"
+        }
+        
+        # XML payload containing sensitive password and sessionId
+        body = """<?xml version="1.0" encoding="utf-8" ?>
+<env:Envelope>
+  <env:Header>
+    <SessionHeader>
+      <sessionId>my_secret_session_id</sessionId>
+    </SessionHeader>
+  </env:Header>
+  <env:Body>
+    <login>
+      <username>test@test.com</username>
+      <password>my_secret_password</password>
+    </login>
+  </env:Body>
+</env:Envelope>"""
+        
+        response_body = """{
+            "access_token": "token_val",
+            "client_secret": "secret_val",
+            "username": "test@test.com"
+        }"""
+        
+        log_sfdc_request(url, method, headers, body, 200, response_body)
+        
+        # Wait for async worker to process the log
+        time.sleep(0.5)
+        
+        # Fetch the log row
+        cursor.execute("SELECT * FROM sfdc_request_logs")
+        rows = cursor.fetchall()
+        self.assertEqual(len(rows), 1)
+        
+        row = rows[0]
+        # Columns: id, timestamp, request_url, request_method, request_headers, request_body, response_status, response_body, error_message
+        logged_headers = json.loads(row[4])
+        logged_body = row[5]
+        logged_response = row[7]
+        
+        # Check that headers are sanitized
+        self.assertEqual(logged_headers.get("Authorization"), "******")
+        self.assertEqual(logged_headers.get("sessionId"), "******")
+        
+        # Check that XML body is sanitized
+        self.assertIn("<sessionId>******</sessionId>", logged_body)
+        self.assertIn("<password>******</password>", logged_body)
+        self.assertNotIn("my_secret_session_id", logged_body)
+        self.assertNotIn("my_secret_password", logged_body)
+        
+        # Check that JSON response body is sanitized
+        self.assertIn('"access_token": "******"', logged_response)
+        self.assertIn('"client_secret": "******"', logged_response)
+        self.assertNotIn("token_val", logged_response)
+        self.assertNotIn("secret_val", logged_response)
+        
+        # Verify username is not sanitized
+        self.assertIn("test@test.com", logged_response)
+        self.assertIn("test@test.com", logged_body)
+        
+        # Clean up database
+        cursor.execute("DELETE FROM sfdc_request_logs")
+        conn.commit()
+        conn.close()
+
 if __name__ == '__main__':
     unittest.main()

@@ -82,11 +82,41 @@
         .ripple-dark {
             background-color: rgba(0, 0, 0, 0.15);
         }
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        /* Hide scrollbar for IE, Edge and Firefox */
+        .no-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
         @keyframes ripple-animation {
             to {
                 transform: scale(4);
                 opacity: 0;
             }
+        }
+        /* Blur effect for loading count rows */
+        .blur-loading {
+            filter: blur(4px);
+            pointer-events: none;
+            user-select: none;
+            opacity: 0.6;
+            position: relative;
+        }
+        .blur-loading::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(2px);
+        }
+        .dark .blur-loading::after {
+            background: rgba(15, 23, 42, 0.3);
         }
     </style>
 </head>
@@ -373,11 +403,12 @@
                     <i class="fa-solid fa-database text-lg"></i>
                     <span>备份管理</span>
                 </button>
-                <!-- Database Tab -->
-                <button onclick="switchTab('database')" id="tabBtn-database"
+                <!-- Batch Monitor Tab -->
+                <button onclick="switchTab('batch')" id="tabBtn-batch"
+                <button onclick="switchTab('batch')" id="tabBtn-batch"
                     class="w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400">
-                    <i class="fa-solid fa-table text-lg"></i>
-                    <span>数据库管理</span>
+                    <i class="fa-solid fa-chart-gantt text-lg"></i>
+                    <span>Batch查询</span>
                 </button>
             </nav>
 
@@ -402,14 +433,9 @@
         <main class="flex-grow flex flex-col bg-slate-50 dark:bg-slate-950 overflow-hidden relative transition-colors duration-200">
             <!-- Main Top Navbar -->
             <header class="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-8 flex items-center justify-between shrink-0 transition-colors duration-200">
-                <div class="flex items-center space-x-3">
-                    <!-- Text box showing contents node, mimicking "2026.06.15 内容点" -->
-                    <div class="flex items-center space-x-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 rounded-lg text-slate-800 dark:text-slate-200">
-                        <i class="fa-regular fa-calendar text-slate-500 dark:text-slate-400 text-xs"></i>
-                        <input type="text" id="nodeNameInput" value="2026.06.15 内容点" 
-                            class="bg-transparent text-sm font-semibold text-slate-800 dark:text-slate-200 focus:outline-none w-44 font-mono focus:border-indigo-500 border-b border-transparent">
-                    </div>
-                    <span class="text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2.5 py-1 rounded-md font-medium">配置节点</span>
+                <!-- Sub-tabs for Operations -->
+                <div id="headerTabsContainer" class="flex-grow flex items-center overflow-x-auto h-full mr-4 no-scrollbar space-x-2">
+                    <!-- Dynamic sub-tabs will be inserted here -->
                 </div>
 
                 <!-- API Server Info Badge -->
@@ -678,6 +704,45 @@
                     </div>
                 </div>
 
+                <!-- =============== 5. BATCH MONITOR VIEW =============== -->
+                <div id="tabContent-batch" class="hidden flex flex-col space-y-6">
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm transition-colors duration-200 flex flex-col space-y-4 min-h-[400px]">
+                        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/80 pb-3">
+                            <h3 class="text-base font-bold text-slate-800 dark:text-white flex items-center space-x-2">
+                                <i class="fa-solid fa-chart-gantt text-indigo-500"></i>
+                                <span>Salesforce Batch 任务运行状态</span>
+                            </h3>
+                            <button onclick="fetchBatchStatus()" class="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition flex items-center shadow-sm shadow-indigo-100/50 dark:shadow-none border border-indigo-100 dark:border-indigo-500/20">
+                                <i class="fa-solid fa-arrows-rotate mr-1.5"></i> 刷新状态
+                            </button>
+                        </div>
+                        
+                        <p class="text-xs text-slate-500 dark:text-slate-400">显示最近的 10 个 <strong>UpdateTheAgreementBatch</strong> 异步批处理任务状态。</p>
+                        
+                        <div class="overflow-x-auto border border-slate-200 dark:border-slate-700/60 rounded-xl overflow-hidden mt-2">
+                            <table class="w-full text-left text-xs whitespace-nowrap">
+                                <thead class="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
+                                    <tr>
+                                        <th class="px-4 py-3">任务 ID</th>
+                                        <th class="px-4 py-3">状态</th>
+                                        <th class="px-4 py-3 text-center">已处理批次</th>
+                                        <th class="px-4 py-3 text-center">总批次</th>
+                                        <th class="px-4 py-3 text-center text-red-500">错误数</th>
+                                        <th class="px-4 py-3">创建时间</th>
+                                        <th class="px-4 py-3">完成时间</th>
+                                        <th class="px-4 py-3">附加信息</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="batchStatusTableBody" class="divide-y divide-slate-100 dark:divide-slate-800/80 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300">
+                                    <tr>
+                                        <td colspan="8" class="px-4 py-8 text-center text-slate-400">点击右上角“刷新状态”查询数据</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </main>
     </div>
@@ -813,6 +878,10 @@
         let selectedRecordIndex = 0; // Currently selected master record
         let tasksConfig = {};
         let sessionData = null;
+
+        // Sub-tabs list state
+        let openTabs = [{ id: 'list', name: '配置列表', type: 'list' }];
+        let activeTabId = 'list';
 
         // Dynamic water ripple effect on button clicks
         document.addEventListener('click', function (e) {
@@ -992,40 +1061,162 @@
             });
         }
 
-        // Navigate to record detail view
-        function viewRecordDetails(index) {
-            selectedRecordIndex = index;
-            tasksConfig = masterRecords[index].subtasks;
+        // Render sub-tabs in top navbar
+        function renderSubTabs() {
+            const container = document.getElementById('headerTabsContainer');
+            if (!container) return;
+            container.innerHTML = '';
 
-            const record = masterRecords[index];
+            openTabs.forEach(tab => {
+                const tabEl = document.createElement('div');
+                const isActive = tab.id === activeTabId;
+                
+                // Base classes matching Tailwind style
+                let tabClass = "flex items-center space-x-2 px-3 py-1.5 text-xs font-semibold rounded-lg border transition cursor-pointer shrink-0 select-none ";
+                if (isActive) {
+                    tabClass += "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border-indigo-150 dark:border-indigo-900/50 shadow-sm";
+                } else {
+                    tabClass += "bg-transparent text-slate-500 dark:text-slate-400 border-transparent hover:bg-slate-105/70 dark:hover:bg-slate-800/40 hover:text-slate-700 dark:hover:text-slate-200";
+                }
+                
+                tabEl.className = tabClass;
+                
+                // Icon
+                let iconHtml = '';
+                if (tab.type === 'list') {
+                    iconHtml = '<i class="fa-solid fa-list-ul"></i>';
+                } else {
+                    iconHtml = '<i class="fa-solid fa-folder-open text-[#a094ed]"></i>';
+                }
+                
+                // Text
+                const textSpan = document.createElement('span');
+                textSpan.textContent = tab.name;
+                
+                tabEl.appendChild(document.createRange().createContextualFragment(iconHtml));
+                tabEl.appendChild(textSpan);
+                
+                // Close button for record tabs
+                if (tab.type === 'record') {
+                    const closeBtn = document.createElement('i');
+                    closeBtn.className = "fa-solid fa-xmark ml-1.5 text-[10px] hover:bg-slate-200 dark:hover:bg-slate-800/60 p-0.5 rounded cursor-pointer transition text-slate-400 hover:text-slate-650 dark:hover:text-slate-200";
+                    closeBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        closeSubTab(tab.id);
+                    };
+                    tabEl.appendChild(closeBtn);
+                }
+                
+                tabEl.onclick = () => {
+                    switchToSubTab(tab.id);
+                };
+                
+                container.appendChild(tabEl);
+            });
+        }
 
-            // Update Breadcrumb & header titles
-            document.getElementById('breadcrumbRecordName').textContent = record.name;
-            document.getElementById('detailRecordName').textContent = record.name;
-
-            // Sync switches toggles and re-render nested sub-tasks table
-            renderDetailSubtasksTable();
-            renderTable();
-            renderBackupTab();
-
-            // Toggle view panels
-            document.getElementById('operationsListView').classList.add('hidden');
-            document.getElementById('operationsDetailView').classList.remove('hidden');
-
-            // Load terminal logs first, then append the transition log
-            loadTerminalLogs(record.id || record.name).then(() => {
-                appendLog(`切换至主配置记录 [${record.name}]。已提取关联的子任务项。`, 'neutral', true);
+        // Switch active sub-tab view
+        function switchToSubTab(tabId) {
+            activeTabId = tabId;
+            renderSubTabs();
+            
+            // Ensure sidebar tab is "operations" (don't call switchTab recursively to avoid infinite loop)
+            const tabs = ['operations', 'logs', 'backup', 'batch'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tabBtn-${t}`);
+                const content = document.getElementById(`tabContent-${t}`);
+                if (btn && content) {
+                    if (t === 'operations') {
+                        btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium text-white bg-indigo-600 shadow-md shadow-indigo-600/10";
+                        content.classList.remove('hidden');
+                    } else {
+                        btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400";
+                        content.classList.add('hidden');
+                    }
+                }
             });
             
-            // Asynchronously fetch subtask counts
-            fetchSubtaskCounts(record.id || record.name);
+            if (tabId === 'list') {
+                // Show List View
+                document.getElementById('operationsDetailView').classList.add('hidden');
+                document.getElementById('operationsListView').classList.remove('hidden');
+            } else {
+                // Find record in masterRecords by name or id
+                const recordIndex = masterRecords.findIndex(r => r.name === tabId || r.id === tabId);
+                if (recordIndex !== -1) {
+                    selectedRecordIndex = recordIndex;
+                    tasksConfig = masterRecords[recordIndex].subtasks;
+                    const record = masterRecords[recordIndex];
+                    
+                    // Update Breadcrumb & header titles
+                    document.getElementById('breadcrumbRecordName').textContent = record.name;
+                    document.getElementById('detailRecordName').textContent = record.name;
+                    
+                    // Render details
+                    renderDetailSubtasksTable();
+                    renderTable();
+                    renderBackupTab();
+                    
+                    // Show Detail View
+                    document.getElementById('operationsListView').classList.add('hidden');
+                    document.getElementById('operationsDetailView').classList.remove('hidden');
+                    
+                    // Load terminal logs
+                    loadTerminalLogs(record.id || record.name).then(() => {
+                        appendLog(`切换至主配置记录 [${record.name}]。已提取关联的子任务项。`, 'neutral', true);
+                    });
+                    
+                    // Fetch subtask counts
+                    fetchSubtaskCounts(record.id || record.name);
+                }
+            }
+        }
+
+        // Close a sub-tab
+        function closeSubTab(tabId) {
+            const tabIndex = openTabs.findIndex(t => t.id === tabId);
+            if (tabIndex === -1) return;
+            
+            openTabs.splice(tabIndex, 1);
+            
+            if (activeTabId === tabId) {
+                const nextActiveIndex = Math.max(0, tabIndex - 1);
+                const nextActiveTab = openTabs[nextActiveIndex];
+                switchToSubTab(nextActiveTab.id);
+            } else {
+                renderSubTabs();
+            }
+        }
+
+        // Safe UI render helper that checks if the active view matches the record
+        function renderOperationsDetailUI(record) {
+            if (record && masterRecords[selectedRecordIndex] && record.name === masterRecords[selectedRecordIndex].name) {
+                renderDetailSubtasksTable();
+                renderTable();
+                renderBackupTab();
+            }
+        }
+
+        // Navigate to record detail view
+        function viewRecordDetails(index) {
+            const record = masterRecords[index];
+            const tabId = record.id || record.name;
+            
+            // Check if tab is already open
+            if (!openTabs.some(t => t.id === tabId)) {
+                openTabs.push({
+                    id: tabId,
+                    name: record.name,
+                    type: 'record'
+                });
+            }
+            
+            switchToSubTab(tabId);
         }
 
         // Show Master configuration records list
         function showOperationsList() {
-            renderMasterRecordsList();
-            document.getElementById('operationsDetailView').classList.add('hidden');
-            document.getElementById('operationsListView').classList.remove('hidden');
+            switchToSubTab('list');
         }
 
         // Render the nested sub-tasks configuration table inside the record detail view
@@ -1069,6 +1260,9 @@
 
                 const hasNoData = parseInt(task.count) === 0;
 
+                // Detect loading state: count is still being calculated
+                const isCountLoading = typeof task.count === 'string' && (task.count.includes('spinner') || task.count.includes('计算中') || task.count.trim() === '');
+
                 // Check if this subtask is mandatory (User & Customer are required to process)
                 const isMandatory = (task.key === 'user' || task.key === 'customer' || task.key === 'account' || apiName === 'User' || apiName === 'Account');
                 if (hasNoData) {
@@ -1079,8 +1273,12 @@
 
                 // Dynamic display for Backup Status column
                 let backupStatusBadge = '';
-                if (task.runState === 'running') {
+                if (task.runState === 'running_backup') {
                     backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.5)]"><i class="fa-solid fa-spinner animate-spin mr-1.5 text-[8px]"></i>正在备份...</span>`;
+                } else if (task.runState === 'running_update') {
+                    backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]"><i class="fa-solid fa-spinner animate-spin mr-1.5 text-[8px]"></i>正在更新...</span>`;
+                } else if (task.runState === 'paused') {
+                    backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/30"><i class="fa-solid fa-pause mr-1.5 text-[8px]"></i>已暂停</span>`;
                 } else if (hasNoData) {
                     backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"><i class="fa-solid fa-ban mr-1.5 text-[8px]"></i>无数据</span>`;
                 } else if (task.backupState === 'success') {
@@ -1101,13 +1299,13 @@
                             </div>
                             <div>
                                 <div class="font-bold text-slate-800 dark:text-white">
-                                    ${task.runState === 'running' ? `
+                                    ${(task.runState === 'running_backup' || task.runState === 'running_update') ? `
                                         <div class="flex items-center">
                                             <span class="relative flex h-2 w-2 mr-2">
-                                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                                                <span class="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
+                                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full ${task.runState === 'running_backup' ? 'bg-indigo-400' : 'bg-emerald-400'} opacity-75"></span>
+                                                <span class="relative inline-flex rounded-full h-2 w-2 ${task.runState === 'running_backup' ? 'bg-indigo-500' : 'bg-emerald-500'}"></span>
                                             </span>
-                                            <button onclick="viewBackupData('${task.key}', '${task.name}')" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline font-bold text-left">
+                                            <button onclick="viewBackupData('${task.key}', '${task.name}')" class="${task.runState === 'running_backup' ? 'text-indigo-600 dark:text-indigo-400' : 'text-emerald-600 dark:text-emerald-400'} hover:underline font-bold text-left">
                                                 ${task.name}
                                             </button>
                                         </div>
@@ -1125,26 +1323,38 @@
                         </div>
                     </td>
                     <td class="px-6 py-4 font-mono text-slate-650 dark:text-slate-300 font-medium">${task.count}</td>
-                    <td class="px-6 py-4">
+                    <td class="px-6 py-4 ${isCountLoading ? 'blur-loading' : ''}">
                         ${backupStatusBadge}
                     </td>
-                    <td class="px-6 py-4 text-center font-mono text-slate-650 dark:text-slate-300 font-medium">
+                    <td class="px-6 py-4 text-center font-mono text-slate-650 dark:text-slate-300 font-medium ${isCountLoading ? 'blur-loading' : ''}">
                         ${task.successCount || 0}条
                     </td>
-                    <td class="px-6 py-4 text-center font-mono text-slate-650 dark:text-slate-300 font-medium text-red-500 dark:text-red-400">
-                        ${task.failCount || 0}条
+                    <td class="px-6 py-4 text-center font-mono text-slate-650 dark:text-slate-300 font-medium text-red-500 dark:text-red-400 ${isCountLoading ? 'blur-loading' : ''}">
+                        ${(task.failCount || 0) > 0 ? `<button onclick="viewFailedRecords('${task.key}', '${task.name}')" class="hover:underline cursor-pointer font-bold">${task.failCount || 0}条</button>` : `${task.failCount || 0}条`}
                     </td>
-                    <td class="px-6 py-4 text-center">
+                    <td class="px-6 py-4 text-center ${isCountLoading ? 'blur-loading' : ''}">
                         <label class="relative inline-flex items-center ${cursorClass}">
-                            <input type="checkbox" id="exec-switch-${task.key}" ${checkedAttr} ${disabledAttr} onchange="updateTaskExecution('${task.key}')" class="sr-only peer">
+                            <input type="checkbox" id="exec-switch-${task.key}" ${checkedAttr} ${disabledAttr} ${isCountLoading ? 'disabled' : ''} onchange="updateTaskExecution('${task.key}')" class="sr-only peer">
                             <div class="w-9 h-5 bg-slate-200 dark:bg-slate-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                         </label>
                     </td>
-                    <td class="px-6 py-4 text-center whitespace-nowrap">
-                        ${hasNoData ? `
+                    <td class="px-6 py-4 text-center whitespace-nowrap ${isCountLoading ? 'blur-loading' : ''}">
+                        ${isCountLoading ? `
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
-                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>
+                            ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                        ` : hasNoData ? `
+                            <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-bold transition mr-1.5" title="点击重新备份并获取最新条数">备份</button>
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
+                            ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                        ` : task.runState === 'running_update' ? `
+                            <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
+                            <button onclick="pauseSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 rounded-md border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/60 font-bold transition mr-1.5">暂停</button>
+                            ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                        ` : task.runState === 'paused' ? `
+                            <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
+                            <button onclick="resumeSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-md border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold transition mr-1.5">继续</button>
+                            ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
                         ` : `
                             <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-bold transition mr-1.5">备份</button>
                             <button onclick="updateSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-md border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold transition mr-1.5">更新</button>
@@ -1191,38 +1401,22 @@
         async function fetchSubtaskCounts(buConfigId) {
             if (!sessionData) return;
             
+            const record = masterRecords.find(r => (r.id || r.name) === buConfigId);
+            if (!record) return;
+            const localTasksConfig = record.subtasks;
+            
             // Set all count columns for current tasksConfig to "计算中..." or a spinner
-            Object.keys(tasksConfig).forEach(key => {
-                const countVal = tasksConfig[key].count;
+            Object.keys(localTasksConfig).forEach(key => {
+                const countVal = localTasksConfig[key].count;
                 if (countVal === "计算中..." || !countVal || countVal.includes("spinner")) {
-                    tasksConfig[key].count = '<i class="fa-solid fa-spinner animate-spin text-xs text-indigo-500"></i>';
+                    localTasksConfig[key].count = '<i class="fa-solid fa-spinner animate-spin text-xs text-indigo-500"></i>';
                 }
             });
-            renderDetailSubtasksTable();
+            renderOperationsDetailUI(record);
             
-            try {
-                const response = await fetch('/api/subtask-counts', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        bu_config_id: buConfigId,
-                        sessionId: sessionData.sessionId,
-                        serverUrl: sessionData.serverUrl
-                    })
-                });
-                const data = await response.json();
-                if (response.ok && data.success && data.counts) {
-                    Object.keys(data.counts).forEach(key => {
-                        if (tasksConfig[key]) {
-                            tasksConfig[key].count = data.counts[key];
-                        }
-                    });
-                    renderDetailSubtasksTable();
-                    renderBackupTab();
-                }
-            } catch (err) {
-                console.error("加载数据量失败", err);
-            }
+            // User requested: 如果我们本地有了就不要再去系统里取最新的了，除非点备份按钮获取最新的
+            // Therefore, we removed the automatic fetch to /api/subtask-counts here.
+            // The count will be updated when the user clicks 'Backup'.
         }
 
         // State update functions triggered by operations config backup switches
@@ -1627,6 +1821,12 @@
             showDataViewerModal(`${taskName} - 备份数据查看`, `/api/backup/data?bu_config_id=${encodeURIComponent(buConfigId)}&subtask_key=${encodeURIComponent(subtaskKey)}`);
         }
 
+        async function viewFailedRecords(subtaskKey, taskName) {
+            const record = masterRecords[selectedRecordIndex];
+            const buConfigId = record.id || record.name;
+            showDataViewerModal(`${taskName} - 失败记录查看`, `/api/backup/failed?bu_config_id=${encodeURIComponent(buConfigId)}&subtask_key=${encodeURIComponent(subtaskKey)}`);
+        }
+
         async function showDataViewerModal(title, apiUrl) {
             const modal = document.getElementById('dataViewerModal');
             const titleElem = document.getElementById('dataViewerTitle');
@@ -1691,7 +1891,7 @@
                 });
             });
             
-            const preferredOrder = ['Id', 'Name', 'id', 'name'];
+            const preferredOrder = ['Id', 'Name', 'id', 'name', 'error_message'];
             preferredOrder.reverse().forEach(col => {
                 const idx = columns.findIndex(c => c.toLowerCase() === col.toLowerCase());
                 if (idx !== -1) {
@@ -1713,7 +1913,13 @@
                 
                 columns.forEach(col => {
                     const td = document.createElement('td');
-                    td.className = "px-4 py-2.5 font-mono whitespace-nowrap border-r border-slate-200 dark:border-slate-800 last:border-r-0 max-w-xs truncate";
+                    
+                    // Special styling for error_message column
+                    if (col.toLowerCase() === 'error_message') {
+                        td.className = "px-4 py-2.5 font-mono border-r border-slate-200 dark:border-slate-800 last:border-r-0 max-w-md text-red-600 dark:text-red-400 text-xs";
+                    } else {
+                        td.className = "px-4 py-2.5 font-mono whitespace-nowrap border-r border-slate-200 dark:border-slate-800 last:border-r-0 max-w-xs truncate";
+                    }
                     
                     let val = r[col];
                     if (val === null || val === undefined) {
@@ -1759,6 +1965,9 @@
 
         // Trigger manual backup
         async function triggerActualBackup() {
+            const record = masterRecords[selectedRecordIndex];
+            const localTasksConfig = record.subtasks;
+            
             const chkUser = document.getElementById('backup-chk-user') ? document.getElementById('backup-chk-user').checked : false;
             const chkCustomer = document.getElementById('backup-chk-customer') ? document.getElementById('backup-chk-customer').checked : false;
             const chkXx = document.getElementById('backup-chk-xx') ? document.getElementById('backup-chk-xx').checked : false;
@@ -1788,14 +1997,19 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            task_name: task.name
+                            task_name: task.name,
+                            bu_config_id: record.id || record.name,
+                            subtask_key: task.key,
+                            sql: task.sql,
+                            sessionId: sessionData ? sessionData.sessionId : null,
+                            serverUrl: sessionData ? sessionData.serverUrl : null
                         })
                     });
                     
                     const data = await response.json();
                     if (response.ok && data.success) {
-                        tasksConfig[task.key].backupState = 'success';
-                        renderTable();
+                        localTasksConfig[task.key].backupState = 'success';
+                        renderOperationsDetailUI(record);
                         appendLog(`子任务 [${task.name}] 备份写入成功！物理路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
                     } else {
                         appendLog(`子任务 [${task.name}] 备份失败: ${data.error || '未知错误'}`, 'error');
@@ -1808,8 +2022,7 @@
 
             // Re-render and load tree
             loadBackupTree();
-            renderBackupTab();
-            renderDetailSubtasksTable();
+            renderOperationsDetailUI(record);
         }
 
         // Login Submit Handler
@@ -1880,25 +2093,27 @@
 
         // Switch workspace tabs
         function switchTab(tabId) {
-            const tabs = ['operations', 'logs', 'backup', 'database'];
+            const tabs = ['operations', 'logs', 'backup', 'batch']; // Removed 'database' from active toggle array
             tabs.forEach(t => {
                 const btn = document.getElementById(`tabBtn-${t}`);
                 const content = document.getElementById(`tabContent-${t}`);
                 
-                if (t === tabId) {
-                    // Active state
-                    btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium text-white bg-indigo-600 shadow-md shadow-indigo-600/10";
-                    content.classList.remove('hidden');
-                } else {
-                    // Inactive state
-                    btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400";
-                    content.classList.add('hidden');
+                if (btn && content) {
+                    if (t === tabId) {
+                        // Active state
+                        btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium text-white bg-indigo-600 shadow-md shadow-indigo-600/10";
+                        content.classList.remove('hidden');
+                    } else {
+                        // Inactive state
+                        btn.className = "w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-100 text-slate-500 dark:text-slate-400";
+                        content.classList.add('hidden');
+                    }
                 }
             });
             
-            // If operations tab is switched, make sure we show the list view by default
+            // If operations tab is switched, make sure we show the active sub-tab view
             if(tabId === 'operations') {
-                showOperationsList();
+                switchToSubTab(activeTabId);
             }
             
             // Reload tree when backup tab is clicked
@@ -1961,6 +2176,19 @@
                 }
             }
             
+            // Filter out tabs that no longer exist in masterRecords
+            openTabs = openTabs.filter(tab => {
+                if (tab.type === 'list') return true;
+                return masterRecords.some(r => (r.id || r.name) === tab.id);
+            });
+            
+            // If activeTabId is no longer in openTabs, default to 'list'
+            if (!openTabs.some(t => t.id === activeTabId)) {
+                activeTabId = 'list';
+            }
+            
+            renderSubTabs();
+            
             // Re-render components
             renderMasterRecordsList();
             renderTable();
@@ -2017,6 +2245,10 @@
             document.getElementById('workspaceView').classList.add('hidden');
             document.getElementById('loginView').classList.remove('hidden');
             
+            // Reset sub-tabs
+            openTabs = [{ id: 'list', name: '配置列表', type: 'list' }];
+            activeTabId = 'list';
+            
             // Show floating theme switch back on login screen
             document.getElementById('themeToggleFloatingContainer').classList.remove('hidden');
             initTheme();
@@ -2053,8 +2285,9 @@
             if (type === 'neutral') prefix = ``;
 
             line.innerHTML = `<span class="text-slate-500">[${time}]</span> ${prefix} ${message}`;
-            terminal.appendChild(line);
-            terminal.scrollTop = terminal.scrollHeight;
+            // 倒序展示：最新的日志始终在顶部
+            terminal.prepend(line);
+            terminal.scrollTop = 0;
 
             if (persist && masterRecords && masterRecords[selectedRecordIndex]) {
                 const record = masterRecords[selectedRecordIndex];
@@ -2101,9 +2334,10 @@
                         if (log.type === 'neutral') prefix = ``;
 
                         line.innerHTML = `<span class="text-slate-500">[${timeStr}]</span> ${prefix} ${log.message}`;
-                        terminal.appendChild(line);
+                        // 倒序展示：最新的日志插入到顶部
+                        terminal.prepend(line);
                     });
-                    terminal.scrollTop = terminal.scrollHeight;
+                    terminal.scrollTop = 0;
                 } else {
                     terminal.innerHTML = `<div class="text-slate-500 font-mono">[${new Date().toISOString().slice(11,19)}] 系统就绪，等待执行。暂无此配置的历史日志。</div>`;
                 }
@@ -2121,29 +2355,29 @@
         // Simulate a mock refresh action that respects the operations switches
         async function simulateMockRefresh() {
             const record = masterRecords[selectedRecordIndex];
+            const localTasksConfig = record.subtasks;
             
             // Log started
             appendLog(`=== 【流程启动】拉取主数据刷新配置项 [${record.name}] 并进行子任务分发 ===`, 'info');
             
             // Reset run states to ready for active tasks, ignored for inactive
-            Object.keys(tasksConfig).forEach(key => {
-                if (tasksConfig[key].execute) {
-                    tasksConfig[key].runState = 'ready';
+            Object.keys(localTasksConfig).forEach(key => {
+                if (localTasksConfig[key].execute) {
+                    localTasksConfig[key].runState = 'ready';
                 } else {
-                    tasksConfig[key].runState = 'ignored';
+                    localTasksConfig[key].runState = 'ignored';
                 }
             });
-            renderTable();
-            renderDetailSubtasksTable();
+            renderOperationsDetailUI(record);
 
             // Step 1: Pull SFDC Master Data
             await new Promise(resolve => setTimeout(resolve, 800));
             appendLog(`正在通过 SOAP API 查询主记录 [${record.name}] 元数据信息 (省: ${record.province}, 市: ${record.city})...`, 'info');
 
             await new Promise(resolve => setTimeout(resolve, 1000));
-            appendLog(`主配置拉取成功！成功拆分出该配置的 ${Object.keys(tasksConfig).length} 个关联子任务进程：`, 'success');
+            appendLog(`主配置拉取成功！成功拆分出该配置的 ${Object.keys(localTasksConfig).length} 个关联子任务进程：`, 'success');
             let idx = 1;
-            getOrderedTasks(tasksConfig).forEach(task => {
+            getOrderedTasks(localTasksConfig).forEach(task => {
                 appendLog(`-> 子任务 ${idx} [${task.name}]: 待备份/处理数据量 ${task.count}`, 'neutral');
                 idx++;
             });
@@ -2152,27 +2386,24 @@
             await new Promise(resolve => setTimeout(resolve, 1400));
             appendLog("【阶段 1】执行子任务备份检测流程...", 'info');
             
-            for (const task of getOrderedTasks(tasksConfig)) {
+            for (const task of getOrderedTasks(localTasksConfig)) {
                 if (task.execute) {
                     // Highlight the active task in list
-                    task.runState = 'running';
-                    renderDetailSubtasksTable();
-                    renderTable();
+                    task.runState = 'running_backup';
+                    renderOperationsDetailUI(record);
                     await new Promise(resolve => setTimeout(resolve, 600));
 
                     if (parseInt(task.count) === 0) {
                         appendLog(`子任务 [${task.name}] 无数据（0条记录），无需备份，跳过。`, 'success');
                         task.runState = 'success';
-                        renderDetailSubtasksTable();
-                        renderTable();
+                        renderOperationsDetailUI(record);
                         await new Promise(resolve => setTimeout(resolve, 300));
                         continue;
                     }
                     if (task.backupState === 'success') {
                         appendLog(`子任务 [${task.name}] 已经备份完成（已在本地/数据库中记录），跳过重复备份。`, 'success');
                         task.runState = 'success';
-                        renderDetailSubtasksTable();
-                        renderTable();
+                        renderOperationsDetailUI(record);
                         await new Promise(resolve => setTimeout(resolve, 300));
                         continue;
                     }
@@ -2210,14 +2441,11 @@
                         task.runState = 'failed';
                         appendLog(`子任务 [${task.name}] 刷新前备份写入失败：网络连接异常`, 'error');
                     }
-                    renderDetailSubtasksTable();
-                    renderTable();
+                    renderOperationsDetailUI(record);
                     await new Promise(resolve => setTimeout(resolve, 600));
                 }
             }
-            renderTable();
-            renderBackupTab();
-            renderDetailSubtasksTable();
+            renderOperationsDetailUI(record);
             loadBackupTree();
 
             // Step 3: Completion
@@ -2225,7 +2453,7 @@
             appendLog("【阶段 2】主数据备份配置执行汇总...", 'info');
             
             let anyActive = false;
-            getOrderedTasks(tasksConfig).forEach(task => {
+            getOrderedTasks(localTasksConfig).forEach(task => {
                 if (task.execute) {
                     task.runState = 'success';
                     anyActive = true;
@@ -2257,21 +2485,20 @@
                 appendLog("当前没有开启任何子任务执行，本次备份未做改动。", 'warning');
             }
 
-            renderTable();
-            renderDetailSubtasksTable();
+            renderOperationsDetailUI(record);
             renderMasterRecordsList();
         }
 
         // Single subtask backup triggered manually from row Action button
         async function backupSingleTask(key) {
             const record = masterRecords[selectedRecordIndex];
-            const task = tasksConfig[key];
+            const localTasksConfig = record.subtasks;
+            const task = localTasksConfig[key];
             if (!task) return;
             
             // Set running state and render
-            task.runState = 'running';
-            renderDetailSubtasksTable();
-            renderTable();
+            task.runState = 'running_backup';
+            renderOperationsDetailUI(record);
             
             appendLog(`[手动触发] 开始为子任务 [${task.name}] 执行备份，记录数: ${task.count}...`, 'info');
             
@@ -2306,24 +2533,58 @@
                 appendLog(`[手动触发] 子任务 [${task.name}] 备份失败：网络连接异常`, 'error');
             }
             
-            renderDetailSubtasksTable();
-            renderTable();
-            renderBackupTab();
+            renderOperationsDetailUI(record);
             loadBackupTree();
+        }
+
+        function startSubtaskPolling(key) {
+            const record = masterRecords[selectedRecordIndex];
+            const localTasksConfig = record.subtasks;
+            const task = localTasksConfig[key];
+            if (!task) return;
+
+            if (task.pollingInterval) {
+                clearInterval(task.pollingInterval);
+            }
+
+            task.pollingInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/subtask/status?bu_config_id=${encodeURIComponent(record.id || record.name)}&subtask_key=${encodeURIComponent(task.key)}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success) {
+                            task.successCount = data.successCount;
+                            task.failCount = data.failCount;
+                            
+                            if (task.runState === 'running_update') {
+                                renderOperationsDetailUI(record);
+                            } else {
+                                clearInterval(task.pollingInterval);
+                                delete task.pollingInterval;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("轮询子任务状态异常", e);
+                }
+            }, 500);
         }
 
         // Subtask data update triggered manually from row Action button
         async function updateSingleTask(key) {
             const record = masterRecords[selectedRecordIndex];
-            const task = tasksConfig[key];
+            const localTasksConfig = record.subtasks;
+            const task = localTasksConfig[key];
             if (!task) return;
 
             // Set running state and render
-            task.runState = 'running';
-            renderDetailSubtasksTable();
-            renderTable();
+            task.runState = 'running_update';
+            renderOperationsDetailUI(record);
 
             appendLog(`[手动触发] 开始为子任务 [${task.name}] 执行数据更新...`, 'info');
+
+            const pollingKey = task.key;
+            startSubtaskPolling(pollingKey);
 
             try {
                 const response = await fetch('/api/subtask/update', {
@@ -2354,23 +2615,30 @@
             } catch (e) {
                 task.runState = 'failed';
                 appendLog(`[手动触发] 子任务 [${task.name}] 数据更新异常：网络连接问题`, 'error');
+            } finally {
+                if (localTasksConfig[pollingKey] && localTasksConfig[pollingKey].pollingInterval) {
+                    clearInterval(localTasksConfig[pollingKey].pollingInterval);
+                    delete localTasksConfig[pollingKey].pollingInterval;
+                }
             }
 
-            renderDetailSubtasksTable();
-            renderTable();
+            renderOperationsDetailUI(record);
         }
 
         // Subtask retry logic for failed updates
         async function retrySingleTask(key) {
             const record = masterRecords[selectedRecordIndex];
-            const task = tasksConfig[key];
+            const localTasksConfig = record.subtasks;
+            const task = localTasksConfig[key];
             if (!task) return;
 
-            task.runState = 'running';
-            renderDetailSubtasksTable();
-            renderTable();
+            task.runState = 'running_update';
+            renderOperationsDetailUI(record);
 
             appendLog(`[手动触发] 正在重新尝试子任务 [${task.name}] 失败记录的更新...`, 'info');
+
+            const pollingKey = task.key;
+            startSubtaskPolling(pollingKey);
 
             try {
                 const response = await fetch('/api/subtask/retry', {
@@ -2378,7 +2646,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         bu_config_id: record.id || record.name,
-                        subtask_key: task.key
+                        subtask_key: task.key,
+                        sessionId: sessionData ? sessionData.sessionId : null,
+                        serverUrl: sessionData ? sessionData.serverUrl : null
                     })
                 });
                 const data = await response.json();
@@ -2394,18 +2664,122 @@
             } catch (e) {
                 task.runState = 'failed';
                 appendLog(`[手动触发] 子任务 [${task.name}] 重试更新异常：网络连接问题`, 'error');
+            } finally {
+                if (localTasksConfig[pollingKey] && localTasksConfig[pollingKey].pollingInterval) {
+                    clearInterval(localTasksConfig[pollingKey].pollingInterval);
+                    delete localTasksConfig[pollingKey].pollingInterval;
+                }
             }
 
-            renderDetailSubtasksTable();
-            renderTable();
+            renderOperationsDetailUI(record);
+        }
+
+        // Pause a running update task
+        async function pauseSingleTask(key) {
+            const record = masterRecords[selectedRecordIndex];
+            const localTasksConfig = record.subtasks;
+            const task = localTasksConfig[key];
+            if (!task) return;
+
+            appendLog(`[手动触发] 正在暂停子任务 [${task.name}] 的更新...`, 'info');
+
+            try {
+                const response = await fetch('/api/subtask/pause', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bu_config_id: record.id || record.name,
+                        subtask_key: task.key
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    task.runState = 'paused';
+                    appendLog(`[手动触发] 子任务 [${task.name}] 已暂停。`, 'info');
+                    
+                    // Stop polling
+                    if (task.pollingInterval) {
+                        clearInterval(task.pollingInterval);
+                        delete task.pollingInterval;
+                    }
+                } else {
+                    appendLog(`[手动触发] 子任务 [${task.name}] 暂停失败: ${data.error || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                appendLog(`[手动触发] 子任务 [${task.name}] 暂停异常：网络连接问题`, 'error');
+            }
+
+            renderOperationsDetailUI(record);
+        }
+
+        // Resume a paused update task
+        async function resumeSingleTask(key) {
+            const record = masterRecords[selectedRecordIndex];
+            const localTasksConfig = record.subtasks;
+            const task = localTasksConfig[key];
+            if (!task) return;
+
+            // Set running state and render
+            task.runState = 'running_update';
+            renderOperationsDetailUI(record);
+
+            appendLog(`[手动触发] 正在继续子任务 [${task.name}] 的更新...`, 'info');
+
+            const pollingKey = task.key;
+            startSubtaskPolling(pollingKey);
+
+            try {
+                const response = await fetch('/api/subtask/resume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bu_config_id: record.id || record.name,
+                        subtask_key: task.key,
+                        sessionId: sessionData ? sessionData.sessionId : null,
+                        serverUrl: sessionData ? sessionData.serverUrl : null
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    task.successCount = data.successCount;
+                    task.failCount = data.failCount;
+                    
+                    if (data.paused) {
+                        // Task was paused again during resume
+                        task.runState = 'paused';
+                        appendLog(`[手动触发] 子任务 [${task.name}] 已再次暂停。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'info');
+                    } else {
+                        task.runState = data.failCount === 0 ? 'success' : 'failed';
+                        if (data.failCount > 0) {
+                            appendLog(`[手动触发] 子任务 [${task.name}] 继续更新完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'warning');
+                        } else {
+                            appendLog(`[手动触发] 子任务 [${task.name}] 继续更新全部成功！更新记录数: ${data.successCount}条。`, 'success');
+                        }
+                    }
+                } else {
+                    task.runState = 'failed';
+                    appendLog(`[手动触发] 子任务 [${task.name}] 继续更新失败: ${data.error || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                task.runState = 'failed';
+                appendLog(`[手动触发] 子任务 [${task.name}] 继续更新异常：网络连接问题`, 'error');
+            } finally {
+                if (localTasksConfig[pollingKey] && localTasksConfig[pollingKey].pollingInterval) {
+                    clearInterval(localTasksConfig[pollingKey].pollingInterval);
+                    delete localTasksConfig[pollingKey].pollingInterval;
+                }
+            }
+
+            renderOperationsDetailUI(record);
         }
 
         // Trigger the refresh/update workflow for all checked subtasks
         async function runDataRefreshProcess() {
             const record = masterRecords[selectedRecordIndex];
+            const localTasksConfig = record.subtasks;
             appendLog(`=== 【流程启动】开始执行主数据 [${record.name}] 的数据刷新与更新流程 ===`, 'info');
 
-            let activeTasks = getOrderedTasks(tasksConfig).filter(t => t.execute);
+            let activeTasks = getOrderedTasks(localTasksConfig).filter(t => t.execute);
             if (activeTasks.length === 0) {
                 appendLog("没有选择任何可执行的子任务，刷新中止。", 'warning');
                 return;
@@ -2413,12 +2787,14 @@
 
             for (const task of activeTasks) {
                 // Highlight the active task in list
-                task.runState = 'running';
-                renderDetailSubtasksTable();
-                renderTable();
+                task.runState = 'running_update';
+                renderOperationsDetailUI(record);
                 await new Promise(resolve => setTimeout(resolve, 500));
 
                 appendLog(`正在执行子任务 [${task.name}] 的数据更新刷新流程...`, 'info');
+
+                const pollingKey = task.key;
+                startSubtaskPolling(pollingKey);
 
                 try {
                     const response = await fetch('/api/subtask/update', {
@@ -2448,16 +2824,19 @@
                 } catch (e) {
                     task.runState = 'failed';
                     appendLog(`子任务 [${task.name}] 更新网络连接异常`, 'error');
+                } finally {
+                    if (localTasksConfig[pollingKey] && localTasksConfig[pollingKey].pollingInterval) {
+                        clearInterval(localTasksConfig[pollingKey].pollingInterval);
+                        delete localTasksConfig[pollingKey].pollingInterval;
+                    }
                 }
                 
-                renderDetailSubtasksTable();
-                renderTable();
+                renderOperationsDetailUI(record);
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
 
             appendLog(`=== 主数据 [${record.name}] 数据刷新流程执行完毕 ===`, 'success');
-            renderTable();
-            renderDetailSubtasksTable();
+            renderOperationsDetailUI(record);
         }
 
         // Login Tabs switching logic
@@ -2726,6 +3105,77 @@
                 btnSpinner.classList.add('hidden');
             }
         }
+
+        // --- Batch Monitor View Functions ---
+        async function fetchBatchStatus() {
+            if (!sessionData || !sessionData.sessionId || !sessionData.serverUrl) {
+                alert("未连接，请先登录");
+                return;
+            }
+            
+            const tbody = document.getElementById("batchStatusTableBody");
+            tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-slate-400"><i class="fa-solid fa-spinner animate-spin mr-2"></i>正在查询...</td></tr>`;
+            
+            try {
+                const response = await fetch(`/api/batch-status?sessionId=${encodeURIComponent(sessionData.sessionId)}&serverUrl=${encodeURIComponent(sessionData.serverUrl)}`);
+                const data = await response.json();
+                
+                if (data.success && data.jobs) {
+                    if (data.jobs.length === 0) {
+                        tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-slate-400">没有找到相关的 Batch 运行记录</td></tr>`;
+                        return;
+                    }
+                    
+                    let html = '';
+                    data.jobs.forEach(job => {
+                        // Status badge color
+                        let statusColor = "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400";
+                        if (job.Status === 'Completed') statusColor = "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400";
+                        else if (job.Status === 'Failed' || job.Status === 'Aborted') statusColor = "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400";
+                        else if (job.Status === 'Processing' || job.Status === 'Preparing') statusColor = "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400 animate-pulse";
+                        
+                        // Format dates
+                        const formatDate = (isoStr) => {
+                            if (!isoStr) return '-';
+                            try {
+                                const d = new Date(isoStr);
+                                return d.toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                            } catch (e) { return isoStr; }
+                        };
+                        
+                        html += `
+                            <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+                                <td class="px-4 py-3 font-mono text-[11px] text-indigo-500">${job.Id || '-'}</td>
+                                <td class="px-4 py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${statusColor}">
+                                        ${job.Status || 'Unknown'}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-center font-medium">${job.JobItemsProcessed || '0'}</td>
+                                <td class="px-4 py-3 text-center text-slate-500">${job.TotalJobItems || '0'}</td>
+                                <td class="px-4 py-3 text-center font-bold ${job.NumberOfErrors > 0 ? 'text-red-500' : 'text-emerald-500'}">${job.NumberOfErrors || '0'}</td>
+                                <td class="px-4 py-3 text-slate-500 text-[11px]">${formatDate(job.CreatedDate)}</td>
+                                <td class="px-4 py-3 text-slate-500 text-[11px]">${formatDate(job.CompletedDate)}</td>
+                                <td class="px-4 py-3 text-xs max-w-xs truncate" title="${job.ExtendedStatus || ''}">${job.ExtendedStatus || '-'}</td>
+                            </tr>
+                        `;
+                    });
+                    tbody.innerHTML = html;
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-red-500">查询失败: ${data.error || '未知错误'}</td></tr>`;
+                    alert(data.error || "查询失败");
+                }
+            } catch (error) {
+                console.error("Error fetching batch status:", error);
+                tbody.innerHTML = `<tr><td colspan="8" class="px-4 py-8 text-center text-red-500">网络请求失败</td></tr>`;
+                alert("网络请求失败");
+            }
+        }
+        
+        // Auto fetch when switching to batch tab
+        document.getElementById('tabBtn-batch').addEventListener('click', () => {
+            fetchBatchStatus();
+        });
 
         // Run startup initializations
         checkSsoRedirect();
