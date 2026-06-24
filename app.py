@@ -34,6 +34,10 @@ LOG_QUEUE = queue.Queue(maxsize=10000)
 # Key: (bu_config_id, subtask_key), Value: {'paused': bool}
 PAUSE_CONTROL = {}
 
+# Global backup progress tracking
+# Key: (bu_config_id, subtask_key), Value: {'current': int, 'total': int, 'status': str}
+BACKUP_PROGRESS = {}
+
 def log_worker():
     """Background thread worker to write SFDC request logs asynchronously"""
     while True:
@@ -90,7 +94,8 @@ def init_db():
             modified_by_time TEXT,
             progress_text TEXT,
             progress_color TEXT,
-            work_location__c TEXT
+            work_location__c TEXT,
+            BU_Group__c TEXT
         )
         """)
         
@@ -175,7 +180,10 @@ def init_db():
         if 'fail_count' not in columns:
             cursor.execute("ALTER TABLE subtasks ADD COLUMN fail_count INTEGER DEFAULT 0")
         
-        # Check if empty, seed with initial data
+        cursor.execute("PRAGMA table_info(bu_configs)")
+        bu_columns = [r[1] for r in cursor.fetchall()]
+        if 'BU_Group__c' not in bu_columns:
+            cursor.execute("ALTER TABLE bu_configs ADD COLUMN BU_Group__c TEXT")
         # No initial fake data seeded, only keep real data
         conn.commit()
 
@@ -428,7 +436,8 @@ def get_sqlite_records(soap_url=None, session_id=None):
                 "modifiedByTime": row[9],
                 "progressText": row[10],
                 "progressColor": row[11],
-                "work_location__c": row[12] if len(row) > 12 else ""
+                "work_location__c": row[12] if len(row) > 12 else "",
+                "BU_Group__c": row[13] if len(row) > 13 else ""
             }
             
             subtasks_dict = {}
@@ -439,6 +448,8 @@ def get_sqlite_records(soap_url=None, session_id=None):
                 
                 # Use count from database directly as per user request
                 count_str = sub[4] # Fallback to seeded count
+                if count_str == "计算中..." or count_str == "-":
+                    count_str = "备份后显示"
                 
                 subtasks_dict[key] = {
                     "name": sub[3],
@@ -469,6 +480,7 @@ def get_sqlite_records(soap_url=None, session_id=None):
                 "progressText": row[10],
                 "progressColor": row[11],
                 "work_location__c": record_dict_temp["work_location__c"],
+                "BU_Group__c": record_dict_temp["BU_Group__c"],
                 "subtasks": subtasks_dict
             })
             
@@ -572,7 +584,7 @@ def login():
             return jsonify({
                 "success": True,
                 "sessionId": session_id_elem.text,
-                "serverUrl": server_url_elem.text,
+                "serverUrl": server_url_elem.text.split('/services/Soap')[0],  # Extract base URL only
                 "userId": user_id_elem.text if user_id_elem is not None else "",
                 "userInfo": user_info
             })
@@ -847,6 +859,11 @@ def perform_backup():
                         suffix = "-".join(parts[6:])
                         filename_val = f"{date_part}-{time_part}-{suffix}"
                 
+                # Update the count in subtasks table just in case it was not updated
+                cursor.execute("UPDATE subtasks SET count = ? WHERE bu_config_id = ? AND key = ?", 
+                               (f"{existing_backup[1]}条", bu_config_id, subtask_key))
+                conn.commit()
+
                 return jsonify({
                     "success": True, 
                     "resumed": True,
@@ -859,6 +876,10 @@ def perform_backup():
             # 2. Perform query (Salesforce SOAP query or mock query)
             records_to_backup = []
             headers_list = ["Id", "Name", "CreatedDate", "Status"] # default headers
+            
+            # Initialize backup progress tracking
+            progress_key = (bu_config_id, subtask_key)
+            BACKUP_PROGRESS[progress_key] = {'current': 0, 'total': 0, 'status': 'starting'}
             
             # Check if we should execute SOAP query on Salesforce
             soap_success = False
@@ -887,23 +908,93 @@ def perform_backup():
                     if res_query.status_code == 200:
                         root_query = ET.fromstring(res_query.content)
                         
-                        # Parse SOAP records
+                        # Parse SOAP records from first batch
+                        def parse_records(root):
+                            records = []
+                            for elem in root.iter():
+                                if elem.tag.split('}')[-1] == 'records':
+                                    rec_data = {}
+                                    for child in elem:
+                                        tag = child.tag.split('}')[-1]
+                                        if tag == 'type':
+                                            continue
+                                        if len(list(child)) > 0:
+                                            nested_data = {}
+                                            for sub_child in child:
+                                                sub_tag = sub_child.tag.split('}')[-1]
+                                                nested_data[sub_tag] = sub_child.text
+                                            rec_data[tag] = nested_data
+                                        else:
+                                            rec_data[tag] = child.text
+                                    records.append(rec_data)
+                            return records
+                        
+                        records_to_backup.extend(parse_records(root_query))
+                        BACKUP_PROGRESS[progress_key] = {'current': len(records_to_backup), 'total': 0, 'status': 'fetching'}
+                        
+                        # Check if there are more records (queryLocator)
+                        query_locator = None
+                        done = True
+                        size = 0
                         for elem in root_query.iter():
-                            if elem.tag.split('}')[-1] == 'records':
-                                rec_data = {}
-                                for child in elem:
-                                    tag = child.tag.split('}')[-1]
-                                    if tag == 'type':
-                                        continue
-                                    if len(list(child)) > 0:
-                                        nested_data = {}
-                                        for sub_child in child:
-                                            sub_tag = sub_child.tag.split('}')[-1]
-                                            nested_data[sub_tag] = sub_child.text
-                                        rec_data[tag] = nested_data
-                                    else:
-                                        rec_data[tag] = child.text
-                                records_to_backup.append(rec_data)
+                            if elem.tag.split('}')[-1] == 'done':
+                                done = (elem.text and elem.text.lower() == 'true')
+                                print(f"[DEBUG] Found 'done' element: {elem.text}")
+                            elif elem.tag.split('}')[-1] == 'queryLocator':
+                                query_locator = elem.text
+                                if query_locator:
+                                    print(f"[DEBUG] Found 'queryLocator': {elem.text[:50]}...")
+                            elif elem.tag.split('}')[-1] == 'size':
+                                if elem.text:
+                                    size = int(elem.text)
+                                    print(f"[DEBUG] Found 'size': {elem.text}")
+                        
+                        print(f"[DEBUG] Query result: done={done}, has_queryLocator={query_locator is not None}, size={size}, records_count={len(records_to_backup)}")
+                        
+                        # If not done, use queryMore to fetch remaining records
+                        while not done and query_locator:
+                            print(f"Fetching more records with queryLocator: {query_locator[:50]}...")
+                            query_more_body = f"""<?xml version="1.0" encoding="utf-8" ?>
+<env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xmlns:env="http://schemas.xmlsoap.org/soap/envelope/">
+  <env:Header>
+    <SessionHeader xmlns="urn:partner.soap.sforce.com">
+      <sessionId>{session_id}</sessionId>
+    </SessionHeader>
+  </env:Header>
+  <env:Body>
+    <queryMore xmlns="urn:partner.soap.sforce.com">
+      <queryLocator>{html.escape(query_locator)}</queryLocator>
+    </queryMore>
+  </env:Body>
+</env:Envelope>"""
+                            more_headers = {"Content-Type": "text/xml; charset=UTF-8", "SOAPAction": "queryMore"}
+                            res_more = requests.post(soap_url, data=query_more_body.encode('utf-8'), 
+                                                    headers=more_headers, timeout=20)
+                            log_sfdc_request(soap_url, "POST", more_headers, query_more_body, res_more.status_code, res_more.content)
+                            
+                            if res_more.status_code == 200:
+                                root_more = ET.fromstring(res_more.content)
+                                more_records = parse_records(root_more)
+                                records_to_backup.extend(more_records)
+                                print(f"Fetched {len(more_records)} more records. Total: {len(records_to_backup)}")
+                                BACKUP_PROGRESS[progress_key] = {'current': len(records_to_backup), 'total': 0, 'status': 'fetching'}
+                                
+                                # Check if done
+                                done = True
+                                query_locator = None
+                                for elem in root_more.iter():
+                                    if elem.tag.split('}')[-1] == 'done':
+                                        done = (elem.text and elem.text.lower() == 'true')
+                                    elif elem.tag.split('}')[-1] == 'queryLocator':
+                                        query_locator = elem.text
+                            else:
+                                print(f"queryMore failed with status {res_more.status_code}")
+                                break
+                        
+                        print(f"Total records fetched: {len(records_to_backup)}")
+                        BACKUP_PROGRESS[progress_key] = {'current': len(records_to_backup), 'total': len(records_to_backup), 'status': 'saving'}
                         soap_success = True
                 except Exception as e:
                     log_sfdc_request(soap_url, "POST", backup_headers, query_body, error_message=str(e))
@@ -949,6 +1040,10 @@ def perform_backup():
                            (f"{len(records_to_backup)}条", bu_config_id, subtask_key))
             conn.commit()
     
+            # Clear backup progress
+            if progress_key in BACKUP_PROGRESS:
+                del BACKUP_PROGRESS[progress_key]
+    
             return jsonify({
                 "success": True, 
                 "resumed": False,
@@ -957,7 +1052,38 @@ def perform_backup():
                 "count": len(records_to_backup)
             })
     except Exception as e:
+        # Clear backup progress on error
+        progress_key = (data.get('bu_config_id'), data.get('subtask_key'))
+        if progress_key in BACKUP_PROGRESS:
+            del BACKUP_PROGRESS[progress_key]
         return jsonify({"success": False, "error": f"创建备份文件与入库失败: {str(e)}"}), 500
+
+@app.route('/api/backup/progress', methods=['GET'])
+def get_backup_progress():
+    """Get backup progress for a specific subtask"""
+    bu_config_id = request.args.get('bu_config_id')
+    subtask_key = request.args.get('subtask_key')
+    
+    if not bu_config_id or not subtask_key:
+        return jsonify({"success": False, "error": "缺少必要参数"}), 400
+    
+    progress_key = (bu_config_id, subtask_key)
+    progress = BACKUP_PROGRESS.get(progress_key)
+    
+    if progress:
+        return jsonify({
+            "success": True,
+            "current": progress['current'],
+            "total": progress['total'],
+            "status": progress['status']
+        })
+    else:
+        return jsonify({
+            "success": True,
+            "current": 0,
+            "total": 0,
+            "status": "idle"
+        })
 
 @app.route('/api/backup/data', methods=['GET'])
 def get_backup_data():
@@ -1416,7 +1542,9 @@ def get_refresh_config():
                         backup_val = existing_sub[1]
                         run_state_val = existing_sub[2]
                         backup_state_val = existing_sub[3]
-                        count_str = existing_sub[4] or "计算中..."
+                        count_str = existing_sub[4] or "备份后显示"
+                        if count_str == "计算中..." or count_str == "-":
+                            count_str = "备份后显示"
                         success_count_val = existing_sub[5] if existing_sub[5] is not None else 0
                         fail_count_val = existing_sub[6] if existing_sub[6] is not None else 0
                     else:
@@ -1424,7 +1552,7 @@ def get_refresh_config():
                         backup_val = 1
                         run_state_val = 'ready'
                         backup_state_val = 'ready'
-                        count_str = "计算中..."
+                        count_str = "备份后显示"
                         success_count_val = 0
                         fail_count_val = 0
                     
@@ -1471,9 +1599,9 @@ def get_refresh_config():
                     progress_color_val = existing_cfg[1]
                     
                 cursor_db.execute("""
-                INSERT OR REPLACE INTO bu_configs (id, name, province, city, currency, owner, created_by_name, created_by_time, modified_by_name, modified_by_time, progress_text, progress_color, work_location__c)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (rec_id, name, province_val, city_val, "CNY - 中国人民币", owner_val, "精琢技术", created_time, "精琢技术", modified_time, progress_text_val, progress_color_val, rec.get('work_location__c', '')))
+                INSERT OR REPLACE INTO bu_configs (id, name, province, city, currency, owner, created_by_name, created_by_time, modified_by_name, modified_by_time, progress_text, progress_color, work_location__c, BU_Group__c)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (rec_id, name, province_val, city_val, "CNY - 中国人民币", owner_val, "精琢技术", created_time, "精琢技术", modified_time, progress_text_val, progress_color_val, rec.get('work_location__c', ''), rec.get('BU_Group__c', '')))
     
                 formatted_records.append({
                     "id": rec_id,
@@ -1489,6 +1617,7 @@ def get_refresh_config():
                     "progressText": progress_text_val,
                     "progressColor": progress_color_val,
                     "work_location__c": rec.get('work_location__c', ''),
+                    "BU_Group__c": rec.get('BU_Group__c', ''),
                     "subtasks": subtasks
                 })
                 
@@ -1900,20 +2029,20 @@ def update_bu_config_opportunity_status(soap_url, session_id, bu_config_sf_id, s
 def update_custom_label(server_url, session_id, label_name, label_value):
     try:
         base_url = server_url.split('/services/')[0] if '/services/' in server_url else server_url
-        query_url = f"{base_url}/services/data/v58.0/tooling/query/?q=SELECT+Id,Name,Value+FROM+ExternalString+WHERE+Name='{label_name}'"
+        query_url = f"{base_url}/services/data/v58.0/tooling/query/?q=SELECT+Id+FROM+ExternalString+WHERE+Name='{label_name}'"
         headers = {
             "Authorization": f"Bearer {session_id}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Connection": "close"
         }
-        headers["Connection"] = "close"
+        
         import time
         for attempt in range(3):
             try:
                 res = requests.get(query_url, headers=headers, timeout=30)
                 break
             except Exception as e:
-                if attempt == 2:
-                    raise e
+                if attempt == 2: raise e
                 time.sleep(2)
                 
         log_sfdc_request(query_url, "GET", headers, None, res.status_code, res.content)
@@ -1923,23 +2052,46 @@ def update_custom_label(server_url, session_id, label_name, label_value):
             if data.get('size', 0) > 0 and data.get('records'):
                 label_id = data['records'][0]['Id']
                 
+                # ExternalString update in Tooling API directly uses the 'Value' field.
+                # Metadata envelope and FullName are NOT supported for this object.
+                payload = {
+                    "Value": str(label_value)
+                }
+                
                 patch_url = f"{base_url}/services/data/v58.0/tooling/sobjects/ExternalString/{label_id}"
-                payload = {"Value": str(label_value)}
+                
                 for attempt in range(3):
                     try:
                         patch_res = requests.patch(patch_url, json=payload, headers=headers, timeout=30)
                         break
                     except Exception as e:
-                        if attempt == 2:
-                            raise e
+                        if attempt == 2: raise e
                         time.sleep(2)
                 log_sfdc_request(patch_url, "PATCH", headers, payload, patch_res.status_code, patch_res.content)
                 
                 if patch_res.status_code in (200, 204):
                     print(f"Successfully updated Custom Label {label_name} to {label_value}")
+                    # Also log to terminal
+                    with db_conn() as conn_log:
+                        cursor_log = conn_log.cursor()
+                        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        cursor_log.execute("""
+                            INSERT INTO terminal_logs (bu_config_id, timestamp, log_type, message)
+                            VALUES (?, ?, 'success', ?)
+                        """, ('SYSTEM', now_str, f"成功更新自定义标签 {label_name} 为 {label_value}"))
+                        conn_log.commit()
                     return True
                 else:
-                    print(f"Failed to update Custom Label {label_name}: {patch_res.text}")
+                    err_txt = patch_res.text
+                    print(f"Failed to update Custom Label {label_name}: {err_txt}")
+                    with db_conn() as conn_log:
+                        cursor_log = conn_log.cursor()
+                        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        cursor_log.execute("""
+                            INSERT INTO terminal_logs (bu_config_id, timestamp, log_type, message)
+                            VALUES (?, ?, 'error', ?)
+                        """, ('SYSTEM', now_str, f"更新自定义标签 {label_name} 失败: {err_txt}"))
+                        conn_log.commit()
                     return False
             else:
                 print(f"Custom Label {label_name} not found")
@@ -2071,7 +2223,6 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
     opportunity_clear_fields = {"bu__c": "BU__c",
                                "bu_province__c": "BU_province__c",
                                "community__c": "Community__c",
-                               "opportunity_category__c": "Opportunity_Category__c",
                                "region__c": "Region__c"}
 
 
@@ -2093,6 +2244,10 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
             
             # For Account: Skip Acc_Record_Type__c (we need to read it but not update it)
             if subtask_key == 'account' and kl == 'acc_record_type__c':
+                continue
+                
+            # For Opportunity: Skip Opportunity_Category__c (no processing, no nulling)
+            if subtask_key == 'opportunity' and kl == 'opportunity_category__c':
                 continue
             
             # Check if it should be cleared
@@ -2273,6 +2428,46 @@ def update_sobjects_salesforce(soap_url, session_id, object_api_name, records, s
     ordered_results = [results_map[i] for i in range(len(records))]
     return ordered_results
 
+# API to reset subtask records
+@app.route('/api/subtask/reset', methods=['POST'])
+def reset_subtask():
+    data = request.json or {}
+    bu_config_id = data.get('bu_config_id')
+    subtask_key = data.get('subtask_key')
+    
+    if not bu_config_id or not subtask_key:
+        return jsonify({"success": False, "error": "缺少必要参数"}), 400
+        
+    try:
+        with db_conn() as conn:
+            cursor = conn.cursor()
+            
+            # Delete backup records and file data is not deleted to allow history
+            cursor.execute("DELETE FROM backup_records WHERE bu_config_id = ? AND subtask_key = ?", (bu_config_id, subtask_key))
+            
+            # Reset subtask state
+            cursor.execute("""
+                UPDATE subtasks 
+                SET run_state = 'ready', backup_state = 'ready', count = '备份后显示', success_count = 0, fail_count = 0
+                WHERE bu_config_id = ? AND key = ?
+            """, (bu_config_id, subtask_key))
+            
+            # Log this action
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("SELECT name FROM subtasks WHERE bu_config_id = ? AND key = ?", (bu_config_id, subtask_key))
+            row = cursor.fetchone()
+            task_name = row[0] if row else subtask_key
+            cursor.execute("""
+                INSERT INTO terminal_logs (bu_config_id, timestamp, log_type, message)
+                VALUES (?, ?, 'info', ?)
+            """, (bu_config_id, now_str, f"[手动触发] 子任务 [{task_name}] 数据已重置，可重新操作。"))
+            
+            conn.commit()
+            
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": f"重置失败: {str(e)}"}), 500
+
 @app.route('/api/subtask/status', methods=['GET'])
 def get_subtask_status():
     bu_config_id = request.args.get('bu_config_id')
@@ -2311,8 +2506,11 @@ def update_subtask():
             cursor = conn.cursor()
             
             # 1. Fetch pending (non-success) backup records for this subtask
-            cursor.execute("SELECT id, record_id, record_name, raw_data FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND (sync_status IS NULL OR sync_status != 'success')", (bu_config_id, subtask_key))
+            # 限制每次最多处理 500 条，避免一次性处理太多导致卡死
+            cursor.execute("SELECT id, record_id, record_name, raw_data FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND (sync_status IS NULL OR sync_status != 'success') LIMIT 500", (bu_config_id, subtask_key))
             backup_rows = cursor.fetchall()
+            
+            print(f"[UPDATE-DEBUG] Subtask '{subtask_key}': Found {len(backup_rows)} pending records (limited to 500 per batch)")
             
             if not backup_rows:
                 # Let's count existing successes/fails to return correct totals
@@ -2321,6 +2519,18 @@ def update_subtask():
                 cursor.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed'", (bu_config_id, subtask_key))
                 fail_count = cursor.fetchone()[0]
                 return jsonify({"success": True, "successCount": success_count, "failCount": fail_count, "message": "没有找到需要更新的备份记录"})
+            
+            # 设置运行状态为 running_update，让前端知道正在更新
+            cursor.execute("UPDATE subtasks SET run_state = 'running_update' WHERE bu_config_id = ? AND key = ?", (bu_config_id, subtask_key))
+            conn.commit()
+            print(f"[UPDATE-DEBUG] Set run_state to 'running_update'")
+            
+            # 重新统计实际的总记录数，确保 count 字段准确
+            cursor.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ?", (bu_config_id, subtask_key))
+            actual_total = cursor.fetchone()[0]
+            cursor.execute("UPDATE subtasks SET count = ? WHERE bu_config_id = ? AND key = ?", (f"{actual_total}条", bu_config_id, subtask_key))
+            conn.commit()
+            print(f"[UPDATE-DEBUG] Updated count to actual total: {actual_total}")
                 
             cursor.execute("SELECT object_api_name FROM subtasks WHERE bu_config_id = ? AND key = ?", (bu_config_id, subtask_key))
             obj_row = cursor.fetchone()
@@ -2484,8 +2694,9 @@ def update_subtask():
             print(f"Total contract accounts identified: {len(contract_accounts)}")
             
             # Configured per object key (batch size & thread counts)
+            # 使用较小的批次避免卡死，但增加线程数提高并发
             object_configs = {
-                'account': {'chunk_size': 10, 'max_workers': 1}
+                'account': {'chunk_size': 20, 'max_workers': 2}
             }
             config = object_configs.get(subtask_key, {'chunk_size': 10, 'max_workers': 1})
             chunk_size = config['chunk_size']
@@ -2813,8 +3024,21 @@ def update_subtask():
             success_count = cursor_final.fetchone()[0]
             cursor_final.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed'", (bu_config_id, subtask_key))
             fail_count = cursor_final.fetchone()[0]
+            
+            # 检查是否还有待处理记录
+            cursor_final.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND (sync_status IS NULL OR sync_status = 'pending')", (bu_config_id, subtask_key))
+            pending_count = cursor_final.fetchone()[0]
+            
+            # 如果还有待处理记录，继续保持为 running_update
+            if pending_count > 0:
+                new_run_state = 'running_update'
+                print(f"[UPDATE-DEBUG] Still {pending_count} pending records, set run_state to 'running_update'")
+            else:
+                new_run_state = 'success' if fail_count == 0 else 'failed'
+                print(f"[UPDATE-DEBUG] All records processed, set run_state to '{new_run_state}'")
+            
             cursor_final.execute("UPDATE subtasks SET run_state = ? WHERE bu_config_id = ? AND key = ?", 
-                                 ('success' if fail_count == 0 else 'failed', bu_config_id, subtask_key))
+                                 (new_run_state, bu_config_id, subtask_key))
             conn_final.commit()
         
         # Update BU_Config_Refresh__c.userStatus__c based on final result for user subtask
@@ -2877,11 +3101,22 @@ def pause_subtask():
         return jsonify({"success": False, "error": "缺少必要参数"}), 400
     
     pause_key = (bu_config_id, subtask_key)
-    if pause_key in PAUSE_CONTROL:
-        PAUSE_CONTROL[pause_key]['paused'] = True
-        return jsonify({"success": True, "message": "暂停指令已发送"})
-    else:
-        return jsonify({"success": False, "error": "该任务不在运行中"}), 400
+    
+    # 无论当前是否在运行中（可能处于批次间隔），都写入暂停标志
+    if pause_key not in PAUSE_CONTROL:
+        PAUSE_CONTROL[pause_key] = {}
+    PAUSE_CONTROL[pause_key]['paused'] = True
+    
+    try:
+        with db_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE subtasks SET run_state = 'paused' WHERE bu_config_id = ? AND key = ?", 
+                           (bu_config_id, subtask_key))
+            conn.commit()
+    except Exception as e:
+        print(f"Failed to update db state to paused: {e}")
+        
+    return jsonify({"success": True, "message": "暂停指令已生效"})
 
 # API to resume subtask update (继续就是重新调用update)
 @app.route('/api/subtask/resume', methods=['POST'])

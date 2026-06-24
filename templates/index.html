@@ -488,6 +488,7 @@
                                     <thead>
                                         <tr class="bg-slate-50 dark:bg-slate-900/40 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
                                             <th class="px-6 py-3.5">BU 刷新配置名称</th>
+                                            <th class="px-6 py-3.5">BU Group</th>
                                             <th class="px-6 py-3.5">行政省</th>
                                             <th class="px-6 py-3.5">市</th>
                                             <th class="px-6 py-3.5">当前进度</th>
@@ -560,7 +561,7 @@
                                     <thead>
                                         <tr class="bg-slate-50 dark:bg-slate-900/40 border-b border-slate-200 dark:border-slate-800 text-slate-450 dark:text-slate-500 uppercase tracking-wider font-semibold">
                                             <th class="px-6 py-3.5 w-1/4">子任务名称</th>
-                                            <th class="px-6 py-3.5 w-1/6">拆分数据量</th>
+                                            <th class="px-6 py-3.5 w-1/6">数据量</th>
                                             <th class="px-6 py-3.5 w-1/6">是否备份完成</th>
                                             <th class="px-6 py-3.5 w-1/12 text-center">更新成功条数</th>
                                             <th class="px-6 py-3.5 w-1/12 text-center">失败条数</th>
@@ -1046,6 +1047,7 @@
                     <td class="px-6 py-4">
                         <a href="#" onclick="viewRecordDetails(${index}); event.stopPropagation();" class="text-blue-600 dark:text-blue-450 hover:underline font-bold">${record.name}</a>
                     </td>
+                    <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.BU_Group__c || ''}</td>
                     <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.province}</td>
                     <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.city}</td>
                     <td class="px-6 py-4">
@@ -1167,7 +1169,7 @@
                     });
                     
                     // Fetch subtask counts
-                    fetchSubtaskCounts(record.id || record.name);
+                    // fetchSubtaskCounts(record.id || record.name);
                 }
             }
         }
@@ -1261,7 +1263,7 @@
                 const hasNoData = parseInt(task.count) === 0;
 
                 // Detect loading state: count is still being calculated
-                const isCountLoading = typeof task.count === 'string' && (task.count.includes('spinner') || task.count.includes('计算中') || task.count.trim() === '');
+                const isCountLoading = false;
 
                 // Check if this subtask is mandatory (User & Customer are required to process)
                 const isMandatory = (task.key === 'user' || task.key === 'customer' || task.key === 'account' || apiName === 'User' || apiName === 'Account');
@@ -1343,22 +1345,27 @@
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
                             ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                            <button onclick="resetSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/60 font-bold transition" title="重置状态">重置</button>
                         ` : hasNoData ? `
                             <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-bold transition mr-1.5" title="点击重新备份并获取最新条数">备份</button>
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
                             ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                            <button onclick="resetSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/60 font-bold transition" title="重置状态">重置</button>
                         ` : task.runState === 'running_update' ? `
                             <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
                             <button onclick="pauseSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 rounded-md border border-orange-200 dark:border-orange-800 hover:bg-orange-100 dark:hover:bg-orange-900/60 font-bold transition mr-1.5">暂停</button>
                             ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                            <button onclick="resetSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/60 font-bold transition" title="重置状态">重置</button>
                         ` : task.runState === 'paused' ? `
                             <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
                             <button onclick="resumeSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-md border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold transition mr-1.5">继续</button>
                             ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                            <button onclick="resetSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/60 font-bold transition" title="重置状态">重置</button>
                         ` : `
                             <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-bold transition mr-1.5">备份</button>
                             <button onclick="updateSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-md border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 font-bold transition mr-1.5">更新</button>
-                            <button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition">重试</button>
+                            ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition mr-1.5" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>重试</button>`}
+                            <button onclick="resetSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/60 font-bold transition" title="重置状态">重置</button>
                         `}
                     </td>
                 `;
@@ -1397,27 +1404,8 @@
             }
         }
 
-        // Asynchronously fetch subtask counts
-        async function fetchSubtaskCounts(buConfigId) {
-            if (!sessionData) return;
-            
-            const record = masterRecords.find(r => (r.id || r.name) === buConfigId);
-            if (!record) return;
-            const localTasksConfig = record.subtasks;
-            
-            // Set all count columns for current tasksConfig to "计算中..." or a spinner
-            Object.keys(localTasksConfig).forEach(key => {
-                const countVal = localTasksConfig[key].count;
-                if (countVal === "计算中..." || !countVal || countVal.includes("spinner")) {
-                    localTasksConfig[key].count = '<i class="fa-solid fa-spinner animate-spin text-xs text-indigo-500"></i>';
-                }
-            });
-            renderOperationsDetailUI(record);
-            
-            // User requested: 如果我们本地有了就不要再去系统里取最新的了，除非点备份按钮获取最新的
-            // Therefore, we removed the automatic fetch to /api/subtask-counts here.
-            // The count will be updated when the user clicks 'Backup'.
-        }
+        // Asynchronously fetch subtask counts (Removed as per user request to only update after backup)
+        // function fetchSubtaskCounts(buConfigId) { ... }
 
         // State update functions triggered by operations config backup switches
         function updateTaskBackup(key) {
@@ -2155,7 +2143,7 @@
                     
                     // Asynchronously fetch counts and load logs for selected record
                     const activeRecord = masterRecords[selectedRecordIndex];
-                    fetchSubtaskCounts(activeRecord.id || activeRecord.name);
+                    // fetchSubtaskCounts(activeRecord.id || activeRecord.name);
                     loadTerminalLogs(activeRecord.id || activeRecord.name);
                     
                     appendLog(`成功获取主数据刷新配置并自动拆分子任务！共加载 ${masterRecords.length} 项刷新配置。`, 'success');
@@ -2428,6 +2416,7 @@
                         if (response.ok && data.success) {
                             task.backupState = 'success';
                             task.runState = 'success';
+                            task.count = data.count + '条'; // Update count after backup
                             if (data.resumed) {
                                 appendLog(`检测到断点备份数据，子任务 [${task.name}] 已恢复断点，备份记录数: ${data.count} 条。路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
                             } else {
@@ -2519,6 +2508,7 @@
                 if (response.ok && data.success) {
                     task.backupState = 'success';
                     task.runState = 'success';
+                    task.count = data.count + '条'; // Update count after backup
                     if (data.resumed) {
                         appendLog(`[手动触发] 子任务 [${task.name}] 检测到断点备份数据，已恢复断点。路径: <span class="text-indigo-400 font-mono">${data.filePath}</span>`, 'success');
                     } else {
@@ -2553,14 +2543,35 @@
                     if (response.ok) {
                         const data = await response.json();
                         if (data.success) {
+                            const oldSuccessCount = task.successCount || 0;
                             task.successCount = data.successCount;
                             task.failCount = data.failCount;
+                            
+                            if (oldSuccessCount !== data.successCount && task.runState === 'running_update') {
+                                console.log(`[轮询] ${task.name}: 成功 ${data.successCount} 条`);
+                            }
+                            
+                            if (data.runState && data.runState !== 'running_update' && task.runState === 'running_update') {
+                                task.runState = data.runState;
+                                const totalRecords = parseInt(task.count) || 0;
+                                const processedRecords = (data.successCount || 0) + (data.failCount || 0);
+                                const hasMoreRecords = processedRecords < totalRecords;
+                                
+                                if (hasMoreRecords) {
+                                    task.runState = 'ready';
+                                    const remaining = totalRecords - processedRecords;
+                                    appendLog(`[自动] 子任务 [${task.name}] 本批次完成。还剩 ${remaining} 条待处理。`, 'info');
+                                } else {
+                                    appendLog(`[自动] 子任务 [${task.name}] 更新已完成。成功: ${task.successCount}条，失败: ${task.failCount}条`, task.failCount === 0 ? 'success' : 'warning');
+                                }
+                            }
                             
                             if (task.runState === 'running_update') {
                                 renderOperationsDetailUI(record);
                             } else {
                                 clearInterval(task.pollingInterval);
                                 delete task.pollingInterval;
+                                renderOperationsDetailUI(record);
                             }
                         }
                     }
@@ -2601,12 +2612,29 @@
                 if (response.ok && data.success) {
                     task.successCount = data.successCount;
                     task.failCount = data.failCount;
-                    task.runState = data.failCount === 0 ? 'success' : 'failed';
                     
-                    if (data.failCount > 0) {
-                        appendLog(`[手动触发] 子任务 [${task.name}] 数据更新完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。请核对失败原因。`, 'warning');
+                    const totalRecords = parseInt(task.count) || 0;
+                    const processedRecords = (data.successCount || 0) + (data.failCount || 0);
+                    const hasMoreRecords = processedRecords < totalRecords;
+                    
+                    if (data.paused) {
+                        task.runState = 'paused';
+                        const remaining = totalRecords - processedRecords;
+                        appendLog(`[操作提示] 子任务 [${task.name}] 更新已暂停。还剩 ${remaining} 条待处理。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'warning');
+                    } else if (hasMoreRecords) {
+                        task.runState = 'running_update';
+                        const remaining = totalRecords - processedRecords;
+                        appendLog(`[自动更新] 子任务 [${task.name}] 本批次完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。还剩 ${remaining} 条待处理，自动继续中...`, 'info');
+                        task.autoUpdateTimer = setTimeout(() => {
+                            if (task.runState !== 'paused') updateSingleTask(key);
+                        }, 800);
                     } else {
-                        appendLog(`[手动触发] 子任务 [${task.name}] 数据更新全部成功！更新记录数: ${data.successCount}条。`, 'success');
+                        task.runState = data.failCount === 0 ? 'success' : 'failed';
+                        if (data.failCount > 0) {
+                            appendLog(`[手动触发] 子任务 [${task.name}] 数据更新完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。请核对失败原因。`, 'warning');
+                        } else {
+                            appendLog(`[手动触发] 子任务 [${task.name}] 数据更新全部成功！更新记录数: ${data.successCount}条。`, 'success');
+                        }
                     }
                 } else {
                     task.runState = 'failed';
@@ -2620,6 +2648,46 @@
                     clearInterval(localTasksConfig[pollingKey].pollingInterval);
                     delete localTasksConfig[pollingKey].pollingInterval;
                 }
+            }
+
+            renderOperationsDetailUI(record);
+        }
+
+        // Subtask reset logic to clear data and state
+        async function resetSingleTask(key) {
+            const record = masterRecords[selectedRecordIndex];
+            const localTasksConfig = record.subtasks;
+            const task = localTasksConfig[key];
+            if (!task) return;
+
+            if (!confirm(`确定要重置子任务 [${task.name}] 吗？\n此操作会清除该任务对应的备份记录和更新状态，以便您可以重新开始刷新操作。`)) {
+                return;
+            }
+
+            appendLog(`[手动触发] 正在重置子任务 [${task.name}] ...`, 'info');
+
+            try {
+                const response = await fetch('/api/subtask/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        bu_config_id: record.id || record.name,
+                        subtask_key: task.key
+                    })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    task.runState = 'ready';
+                    task.backupState = 'ready';
+                    task.count = '备份后显示';
+                    task.successCount = 0;
+                    task.failCount = 0;
+                    appendLog(`[手动触发] 子任务 [${task.name}] 重置成功。`, 'success');
+                } else {
+                    appendLog(`[手动触发] 子任务 [${task.name}] 重置失败: ${data.error || '未知错误'}`, 'error');
+                }
+            } catch (e) {
+                appendLog(`[手动触发] 子任务 [${task.name}] 重置异常：网络连接问题`, 'error');
             }
 
             renderOperationsDetailUI(record);
@@ -2682,6 +2750,14 @@
             if (!task) return;
 
             appendLog(`[手动触发] 正在暂停子任务 [${task.name}] 的更新...`, 'info');
+            
+            // 立即在前端标记为暂停，阻止潜在的自动续传定时器触发
+            task.runState = 'paused';
+            if (task.pollingInterval) {
+                clearInterval(task.pollingInterval);
+                delete task.pollingInterval;
+            }
+            renderOperationsDetailUI(record);
 
             try {
                 const response = await fetch('/api/subtask/pause', {
@@ -2694,16 +2770,9 @@
                 });
                 const data = await response.json();
                 if (response.ok && data.success) {
-                    task.runState = 'paused';
-                    appendLog(`[手动触发] 子任务 [${task.name}] 已暂停。`, 'info');
-                    
-                    // Stop polling
-                    if (task.pollingInterval) {
-                        clearInterval(task.pollingInterval);
-                        delete task.pollingInterval;
-                    }
+                    appendLog(`[手动触发] 子任务 [${task.name}] 已成功发送暂停指令。`, 'info');
                 } else {
-                    appendLog(`[手动触发] 子任务 [${task.name}] 暂停失败: ${data.error || '未知错误'}`, 'error');
+                    appendLog(`[手动触发] 子任务 [${task.name}] 暂停警告: ${data.error || '未知错误'}`, 'warning');
                 }
             } catch (e) {
                 appendLog(`[手动触发] 子任务 [${task.name}] 暂停异常：网络连接问题`, 'error');
@@ -2744,10 +2813,21 @@
                     task.successCount = data.successCount;
                     task.failCount = data.failCount;
                     
+                    const totalRecords = parseInt(task.count) || 0;
+                    const processedRecords = (data.successCount || 0) + (data.failCount || 0);
+                    const hasMoreRecords = processedRecords < totalRecords;
+                    
                     if (data.paused) {
-                        // Task was paused again during resume
                         task.runState = 'paused';
-                        appendLog(`[手动触发] 子任务 [${task.name}] 已再次暂停。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'info');
+                        const remaining = totalRecords - processedRecords;
+                        appendLog(`[操作提示] 子任务 [${task.name}] 已再次暂停。还剩 ${remaining} 条。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'info');
+                    } else if (hasMoreRecords) {
+                        task.runState = 'running_update';
+                        const remaining = totalRecords - processedRecords;
+                        appendLog(`[自动更新] 子任务 [${task.name}] 继续更新本批次完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。还剩 ${remaining} 条待处理，自动继续中...`, 'info');
+                        task.autoUpdateTimer = setTimeout(() => {
+                            if (task.runState !== 'paused') resumeSingleTask(key);
+                        }, 800);
                     } else {
                         task.runState = data.failCount === 0 ? 'success' : 'failed';
                         if (data.failCount > 0) {
@@ -2796,39 +2876,65 @@
                 const pollingKey = task.key;
                 startSubtaskPolling(pollingKey);
 
-                try {
-                    const response = await fetch('/api/subtask/update', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            bu_config_id: record.id || record.name,
-                            subtask_key: task.key,
-                            sessionId: sessionData ? sessionData.sessionId : null,
-                            serverUrl: sessionData ? sessionData.serverUrl : null
-                        })
-                    });
-                    const data = await response.json();
-                    if (response.ok && data.success) {
-                        task.successCount = data.successCount;
-                        task.failCount = data.failCount;
-                        task.runState = data.failCount === 0 ? 'success' : 'failed';
-                        if (data.failCount > 0) {
-                            appendLog(`子任务 [${task.name}] 更新完成，部分失败。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'warning');
+                let hasMoreRecords = true;
+                while (hasMoreRecords) {
+                    if (task.runState === 'paused') {
+                        break;
+                    }
+                    try {
+                        const response = await fetch('/api/subtask/update', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                bu_config_id: record.id || record.name,
+                                subtask_key: task.key,
+                                sessionId: sessionData ? sessionData.sessionId : null,
+                                serverUrl: sessionData ? sessionData.serverUrl : null
+                            })
+                        });
+                        const data = await response.json();
+                        if (response.ok && data.success) {
+                            task.successCount = data.successCount;
+                            task.failCount = data.failCount;
+                            
+                            const totalRecords = parseInt(task.count) || 0;
+                            const processedRecords = (data.successCount || 0) + (data.failCount || 0);
+                            hasMoreRecords = processedRecords < totalRecords;
+                            
+                            if (data.paused) {
+                                task.runState = 'paused';
+                                const remaining = totalRecords - processedRecords;
+                                appendLog(`[操作提示] 子任务 [${task.name}] 已暂停。还剩 ${remaining} 条。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'warning');
+                                break;
+                            } else if (hasMoreRecords) {
+                                task.runState = 'running_update';
+                                const remaining = totalRecords - processedRecords;
+                                appendLog(`子任务 [${task.name}] 本批次完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。还剩 ${remaining} 条待处理，自动继续中...`, 'info');
+                                renderOperationsDetailUI(record);
+                                await new Promise(resolve => setTimeout(resolve, 800));
+                            } else {
+                                task.runState = data.failCount === 0 ? 'success' : 'failed';
+                                if (data.failCount > 0) {
+                                    appendLog(`子任务 [${task.name}] 更新完成，部分失败。成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'warning');
+                                } else {
+                                    appendLog(`子任务 [${task.name}] 更新全部成功！成功: ${data.successCount}条。`, 'success');
+                                }
+                            }
                         } else {
-                            appendLog(`子任务 [${task.name}] 更新全部成功！成功: ${data.successCount}条。`, 'success');
+                            task.runState = 'failed';
+                            appendLog(`子任务 [${task.name}] 更新失败: ${data.error || '未知错误'}`, 'error');
+                            break;
                         }
-                    } else {
+                    } catch (e) {
                         task.runState = 'failed';
-                        appendLog(`子任务 [${task.name}] 更新失败: ${data.error || '未知错误'}`, 'error');
+                        appendLog(`子任务 [${task.name}] 更新网络连接异常`, 'error');
+                        break;
                     }
-                } catch (e) {
-                    task.runState = 'failed';
-                    appendLog(`子任务 [${task.name}] 更新网络连接异常`, 'error');
-                } finally {
-                    if (localTasksConfig[pollingKey] && localTasksConfig[pollingKey].pollingInterval) {
-                        clearInterval(localTasksConfig[pollingKey].pollingInterval);
-                        delete localTasksConfig[pollingKey].pollingInterval;
-                    }
+                }
+                
+                if (localTasksConfig[pollingKey] && localTasksConfig[pollingKey].pollingInterval) {
+                    clearInterval(localTasksConfig[pollingKey].pollingInterval);
+                    delete localTasksConfig[pollingKey].pollingInterval;
                 }
                 
                 renderOperationsDetailUI(record);
