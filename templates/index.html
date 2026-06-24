@@ -552,7 +552,7 @@
                                     <i class="fa-solid fa-list-check text-indigo-500"></i>
                                     <span>根据主数据拆分的子任务 (子任务即对象)</span>
                                 </h3>
-                                <span class="text-xs bg-slate-100 dark:bg-slate-855 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-mono font-medium">3 项相关记录</span>
+                                <span id="subtaskCountBadge" class="text-xs bg-slate-100 dark:bg-slate-855 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-mono font-medium">3 项相关记录</span>
                             </div>
                             
                             <!-- Nested Table -->
@@ -1226,10 +1226,28 @@
             const tbody = document.getElementById('detailSubtasksTableBody');
             tbody.innerHTML = '';
 
-            getOrderedTasks(tasksConfig).forEach(task => {
+            const orderedTasks = getOrderedTasks(tasksConfig);
+            
+            // Update the count badge dynamically
+            const countBadge = document.getElementById('subtaskCountBadge');
+            if (countBadge) {
+                countBadge.textContent = `${orderedTasks.length} 项相关记录`;
+            }
+
+            // Check if any task is currently running update or backup
+            const anyTaskRunning = orderedTasks.some(t => t.runState === 'running_update' || t.runState === 'running_backup');
+
+            orderedTasks.forEach(task => {
                 const tr = document.createElement('tr');
-                if (task.runState === 'running') {
-                    tr.className = "running-row hover:bg-slate-50/80 dark:hover:bg-slate-850/20 transition";
+                if (task.runState && task.runState.startsWith('running')) {
+                    tr.className = "running-row hover:bg-slate-50/80 dark:hover:bg-slate-850/20 transition relative";
+                    if (task.runState === 'running_update') {
+                        tr.style.backgroundImage = "linear-gradient(90deg, transparent, rgba(16,185,129,0.15), transparent)";
+                    } else {
+                        tr.style.backgroundImage = "linear-gradient(90deg, transparent, rgba(99,102,241,0.15), transparent)";
+                    }
+                    tr.style.backgroundSize = "200% 100%";
+                    tr.style.animation = "shimmers 2.5s infinite linear";
                 } else {
                     tr.className = "hover:bg-slate-50/80 dark:hover:bg-slate-850/20 transition";
                 }
@@ -1289,9 +1307,10 @@
                     backupStatusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700"><i class="fa-regular fa-clock mr-1.5 text-[8px]"></i>未完成</span>`;
                 }
 
-                const cursorClass = (isMandatory || hasNoData) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer';
+                const isOtherTaskRunning = anyTaskRunning && (!task.runState || !task.runState.startsWith('running'));
+                const cursorClass = (isMandatory || hasNoData || isOtherTaskRunning) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer';
                 const checkedAttr = task.execute ? 'checked' : '';
-                const disabledAttr = (isMandatory || hasNoData) ? 'disabled' : '';
+                const disabledAttr = (isMandatory || hasNoData || isOtherTaskRunning) ? 'disabled' : '';
 
                 tr.innerHTML = `
                     <td class="px-6 py-4">
@@ -1344,8 +1363,13 @@
                         ${isCountLoading ? `
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
-                            ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重试</button>`}
+                            ${(task.failCount > 0) ? `<button onclick="retrySingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-md border border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/60 font-bold transition mr-1.5" title="重试失败的记录">重试</button>` : `<button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>重试</button>`}
                             <button onclick="resetSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-md border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/60 font-bold transition" title="重置状态">重置</button>
+                        ` : isOtherTaskRunning ? `
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>备份</button>
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>重试</button>
+                            <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition" disabled>重置</button>
                         ` : hasNoData ? `
                             <button onclick="backupSingleTask('${task.key}')" class="px-2.5 py-1 text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-md border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-bold transition mr-1.5" title="点击重新备份并获取最新条数">备份</button>
                             <button class="px-2.5 py-1 text-[10px] bg-slate-100 dark:bg-slate-800/40 text-slate-400 dark:text-slate-500 rounded-md border border-slate-200 dark:border-slate-800/60 cursor-not-allowed font-bold transition mr-1.5" disabled>更新</button>
