@@ -2747,8 +2747,17 @@
                 if (response.ok && data.success) {
                     task.successCount = data.successCount;
                     task.failCount = data.failCount;
-                    task.runState = data.failCount === 0 ? 'success' : 'failed';
-                    appendLog(`[手动触发] 子任务 [${task.name}] 重试成功！修复 ${data.retriedCount}条 失败记录。当前成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'success');
+                    
+                    if (data.failCount > 0 && data.retriedCount > 0) {
+                        task.runState = 'running_update';
+                        appendLog(`[自动更新] 子任务 [${task.name}] 重试本批次完成。成功: ${data.successCount}条, 失败: ${data.failCount}条。继续重试中...`, 'info');
+                        task.autoUpdateTimer = setTimeout(() => {
+                            if (task.runState !== 'paused') retrySingleTask(key);
+                        }, 800);
+                    } else {
+                        task.runState = data.failCount === 0 ? 'success' : 'failed';
+                        appendLog(`[手动触发] 子任务 [${task.name}] 重试完成！当前成功: ${data.successCount}条, 失败: ${data.failCount}条。`, 'success');
+                    }
                 } else {
                     task.runState = 'failed';
                     appendLog(`[手动触发] 子任务 [${task.name}] 重试更新失败: ${data.error || '未知错误'}`, 'error');

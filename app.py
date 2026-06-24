@@ -2551,11 +2551,11 @@ def update_subtask():
             cursor = conn.cursor()
             
             # 1. Fetch pending (non-success) backup records for this subtask
-            # 限制每次最多处理 500 条，避免一次性处理太多导致卡死
-            cursor.execute("SELECT id, record_id, record_name, raw_data FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND (sync_status IS NULL OR sync_status != 'success') LIMIT 500", (bu_config_id, subtask_key))
+            # 限制每次最多处理 200 条，避免一次性处理太多导致前端请求超时断开
+            cursor.execute("SELECT id, record_id, record_name, raw_data FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND (sync_status IS NULL OR sync_status != 'success') LIMIT 200", (bu_config_id, subtask_key))
             backup_rows = cursor.fetchall()
             
-            print(f"[UPDATE-DEBUG] Subtask '{subtask_key}': Found {len(backup_rows)} pending records (limited to 500 per batch)")
+            print(f"[UPDATE-DEBUG] Subtask '{subtask_key}': Found {len(backup_rows)} pending records (limited to 200 per batch)")
             
             if not backup_rows:
                 # Let's count existing successes/fails to return correct totals
@@ -3192,8 +3192,8 @@ def retry_subtask():
         with db_conn() as conn:
             cursor = conn.cursor()
             
-            # 1. Fetch failed backup records
-            cursor.execute("SELECT id, record_id, record_name, raw_data FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed'", (bu_config_id, subtask_key))
+            # 1. Fetch failed backup records (limited to 200 to avoid timeouts)
+            cursor.execute("SELECT id, record_id, record_name, raw_data FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed' LIMIT 200", (bu_config_id, subtask_key))
             failed_rows = cursor.fetchall()
             
             # Check if all records are already successful (for account batch trigger)
