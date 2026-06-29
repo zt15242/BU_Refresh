@@ -464,27 +464,34 @@
                     
                     <!-- ============ 1. OPERATIONS: LIST VIEW ============ -->
                     <div id="operationsListView" class="flex flex-col space-y-4">
-                        <!-- Header banner (No New button) -->
-                        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm flex items-center justify-between transition-colors duration-200">
-                            <div class="flex items-center space-x-3.5">
-                                <div class="bg-[#a094ed] text-white p-3 rounded-lg shadow-md flex items-center justify-center w-11 h-11">
-                                    <i class="fa-solid fa-folder-open text-lg"></i>
-                                </div>
-                                <div>
-                                    <h2 class="text-base font-bold text-slate-800 dark:text-white">BU 刷新配置列表</h2>
-                                    <p class="text-xs text-slate-500 dark:text-slate-450 mt-0.5">请选择任意一个主数据刷新配置项以管理和执行同步子任务</p>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Grid Table for List of configs -->
                         <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden transition-colors duration-200">
                             <div class="px-6 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between text-xs text-slate-550 dark:text-slate-400">
-                                <span>3 个项目 • 排序依 BU 刷新配置名称 • 刚刚更新</span>
-                                <i onclick="loadRefreshConfigs(true)" class="fa-solid fa-rotate-right cursor-pointer hover:text-slate-700 dark:hover:text-white transition" title="从 Salesforce 获取最新数据"></i>
+                                <div class="flex items-center space-x-4">
+                                    <span id="masterRecordsCount">0 个项目</span>
+                                    <div class="relative">
+                                        <input type="text" id="configSearchInput" oninput="handleConfigSearch()" placeholder="搜索配置或省份..." class="pl-7 pr-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 w-48 text-slate-800 dark:text-slate-200">
+                                        <i class="fa-solid fa-search absolute left-2.5 top-2 text-slate-400"></i>
+                                    </div>
+                                    <select id="configStatusFilter" onchange="handleConfigSearch()" class="py-1.5 pl-2 pr-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-800 dark:text-slate-200">
+                                        <option value="">所有进度</option>
+                                        <option value="待开始">待开始</option>
+                                        <option value="进行中">进行中</option>
+                                        <option value="已完成">已完成</option>
+                                        <option value="失败">失败</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-center space-x-5">
+                                    <div class="flex items-center space-x-3" id="paginationControls">
+                                        <button onclick="prevConfigPage()" class="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition disabled:opacity-30 disabled:cursor-not-allowed" id="btnPrevPage"><i class="fa-solid fa-chevron-left"></i></button>
+                                        <span id="pageIndicator" class="font-mono">1 / 1</span>
+                                        <button onclick="nextConfigPage()" class="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition disabled:opacity-30 disabled:cursor-not-allowed" id="btnNextPage"><i class="fa-solid fa-chevron-right"></i></button>
+                                    </div>
+                                    <i onclick="loadRefreshConfigs(true)" class="fa-solid fa-rotate-right cursor-pointer hover:text-slate-700 dark:hover:text-white transition text-sm" title="从 Salesforce 获取最新数据"></i>
+                                </div>
                             </div>
                             <div class="overflow-x-auto">
-                                <table class="w-full text-left border-collapse text-xs">
+                                <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                                     <thead>
                                         <tr class="bg-slate-50 dark:bg-slate-900/40 border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">
                                             <th class="px-6 py-3.5">BU 刷新配置名称</th>
@@ -557,7 +564,7 @@
                             
                             <!-- Nested Table -->
                             <div class="overflow-x-auto">
-                                <table class="w-full text-left border-collapse text-xs">
+                                <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
                                     <thead>
                                         <tr class="bg-slate-50 dark:bg-slate-900/40 border-b border-slate-200 dark:border-slate-800 text-slate-450 dark:text-slate-500 uppercase tracking-wider font-semibold">
                                             <th class="px-6 py-3.5 w-1/4">子任务名称</th>
@@ -674,7 +681,7 @@
                             
                             <!-- Table Grid -->
                             <div class="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-sm max-h-[500px]">
-                                <table class="w-full text-left border-collapse">
+                                <table class="w-full text-left border-collapse whitespace-nowrap">
                                     <thead>
                                         <tr id="dbViewerTableHeader" class="bg-slate-50 dark:bg-slate-850/50 text-slate-650 dark:text-slate-300 text-xs font-bold border-b border-slate-200 dark:border-slate-800">
                                             <!-- Headers -->
@@ -844,7 +851,7 @@
                 
                 <!-- Spreadsheet Table -->
                 <div id="dataViewerTableContainer" class="hidden overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 shadow-sm">
-                    <table class="w-full text-left border-collapse">
+                    <table class="w-full text-left border-collapse whitespace-nowrap">
                         <thead>
                             <tr id="dataViewerTableHeader" class="bg-slate-50 dark:bg-slate-850/50 text-slate-650 dark:text-slate-300 text-xs font-bold border-b border-slate-200 dark:border-slate-800">
                                 <!-- Dynamic headers -->
@@ -875,6 +882,11 @@
     <script>
         // Master records array (SFDC master data lists with current progress fields)
         let masterRecords = [];
+        let filteredRecords = [];
+        
+        // Pagination state
+        let currentPage = 1;
+        const pageSize = 15;
 
         let selectedRecordIndex = 0; // Currently selected master record
         let tasksConfig = {};
@@ -1020,7 +1032,7 @@
             if (!task || !task.sql) return;
             navigator.clipboard.writeText(task.sql).then(() => {
                 const originalText = element.innerHTML;
-                element.innerHTML = "SQL: <span class='text-emerald-600 dark:text-emerald-400 font-bold'>已复制到剪贴板！</span>";
+                element.innerHTML = "<span class='text-emerald-600 dark:text-emerald-400 font-bold'><i class='fa-solid fa-check mr-1'></i>已复制！</span>";
                 setTimeout(() => {
                     element.innerHTML = originalText;
                 }, 1500);
@@ -1029,23 +1041,88 @@
             });
         }
 
+        function handleConfigSearch() {
+            currentPage = 1;
+            filterConfigs();
+        }
+
+        function filterConfigs() {
+            const query = document.getElementById('configSearchInput') ? document.getElementById('configSearchInput').value.toLowerCase().trim() : '';
+            const statusFilter = document.getElementById('configStatusFilter') ? document.getElementById('configStatusFilter').value : '';
+
+            filteredRecords = masterRecords.filter(record => {
+                const matchQuery = !query || 
+                    (record.name && record.name.toLowerCase().includes(query)) || 
+                    (record.province && record.province.toLowerCase().includes(query)) ||
+                    (record.city && record.city.toLowerCase().includes(query)) ||
+                    (record.BU_Group__c && record.BU_Group__c.toLowerCase().includes(query));
+                
+                const matchStatus = !statusFilter || (record.progressText && record.progressText.includes(statusFilter));
+
+                return matchQuery && matchStatus;
+            });
+
+            const countEl = document.getElementById('masterRecordsCount');
+            if (countEl) countEl.textContent = `${filteredRecords.length} 个项目`;
+            
+            renderMasterRecordsList();
+        }
+
+        function updatePaginationControls() {
+            const totalPages = Math.ceil(filteredRecords.length / pageSize) || 1;
+            const pageIndicator = document.getElementById('pageIndicator');
+            const btnPrev = document.getElementById('btnPrevPage');
+            const btnNext = document.getElementById('btnNextPage');
+            
+            if (pageIndicator) pageIndicator.textContent = `${currentPage} / ${totalPages}`;
+            if (btnPrev) btnPrev.disabled = currentPage <= 1;
+            if (btnNext) btnNext.disabled = currentPage >= totalPages;
+        }
+
+        function prevConfigPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderMasterRecordsList();
+            }
+        }
+
+        function nextConfigPage() {
+            const totalPages = Math.ceil(filteredRecords.length / pageSize) || 1;
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderMasterRecordsList();
+            }
+        }
+
         // --- Master Data List View Rendering ---
         function renderMasterRecordsList() {
             const tbody = document.getElementById('masterRecordsListBody');
             tbody.innerHTML = '';
+            
+            updatePaginationControls();
 
-            masterRecords.forEach((record, index) => {
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = startIndex + pageSize;
+            const paginatedRecords = filteredRecords.slice(startIndex, endIndex);
+
+            if (paginatedRecords.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="px-6 py-12 text-center text-slate-500">没有找到匹配的配置项</td></tr>`;
+                return;
+            }
+
+            paginatedRecords.forEach((record) => {
+                const originalIndex = masterRecords.findIndex(r => r.id === record.id || r.name === record.name);
                 const tr = document.createElement('tr');
                 tr.className = "hover:bg-slate-50 dark:hover:bg-slate-850/25 border-b border-slate-150 dark:border-slate-800/60 transition cursor-pointer";
                 tr.onclick = (e) => {
                     if(e.target.tagName !== 'A') {
-                        viewRecordDetails(index);
+                        viewRecordDetails(originalIndex);
                     }
                 };
 
                 tr.innerHTML = `
                     <td class="px-6 py-4">
-                        <a href="#" onclick="viewRecordDetails(${index}); event.stopPropagation();" class="text-blue-600 dark:text-blue-450 hover:underline font-bold">${record.name}</a>
+                        <a href="#" onclick="viewRecordDetails(${originalIndex}); event.stopPropagation();" class="text-blue-600 dark:text-blue-450 hover:underline font-bold">${record.name}</a>
                     </td>
                     <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.BU_Group__c || ''}</td>
                     <td class="px-6 py-4 text-slate-800 dark:text-slate-355">${record.province}</td>
@@ -1337,8 +1414,9 @@
                                     `}
                                 </div>
                                 <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 font-mono">API Name: ${apiName}</div>
-                                 <div onclick="copySql(this, '${task.key}')" class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 max-w-sm lg:max-w-xl truncate font-mono cursor-pointer hover:underline" title="点击复制 SQL">
-                                     SQL: ${task.sql || 'N/A'}
+                                 <div onclick="copySql(this, '${task.key}')" class="text-[10px] text-indigo-500 dark:text-indigo-400 mt-1 inline-flex items-center space-x-1 cursor-pointer hover:underline" title="点击复制查询语句">
+                                     <i class="fa-regular fa-copy"></i>
+                                     <span>复制 SQL</span>
                                  </div>
                             </div>
                         </div>
@@ -2202,7 +2280,7 @@
             renderSubTabs();
             
             // Re-render components
-            renderMasterRecordsList();
+            filterConfigs();
             renderTable();
             renderBackupTab();
             renderDetailSubtasksTable();
@@ -2499,7 +2577,7 @@
             }
 
             renderOperationsDetailUI(record);
-            renderMasterRecordsList();
+            filterConfigs();
         }
 
         // Single subtask backup triggered manually from row Action button

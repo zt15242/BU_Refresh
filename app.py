@@ -823,6 +823,15 @@ def perform_backup():
     bu_config_id = data.get('bu_config_id')
     subtask_key = data.get('subtask_key')
     sql = data.get('sql')
+    
+    if subtask_key == 'opportunity' and sql:
+        import re
+        fields_to_add = ["BU_province__r.Name", "BU_province_lastmonth__c", "BU_lastmonth__c", "Community_lastmonth__c", "Region_lastmonth__c"]
+        for field in fields_to_add:
+            # Simple check if field exists (might have false positives but safe enough)
+            if field.lower() not in sql.lower():
+                sql = re.sub(r'(?i)(SELECT\s+)', f'\\1{field}, ', sql, count=1)
+                
     session_id = data.get('sessionId')
     server_url = data.get('serverUrl')
     
@@ -1414,7 +1423,7 @@ def get_refresh_config():
                 city_field = f['name']
             
         query_fields = list(set(query_fields))
-        soql = f"SELECT {', '.join(query_fields)} FROM BU_Config_Refresh__c LIMIT 100"
+        soql = f"SELECT {', '.join(query_fields)} FROM BU_Config_Refresh__c ORDER BY CreatedDate ASC, Name ASC LIMIT 2000"
 
         # 5. Execute SOAP Query
         query_body = f"""<?xml version="1.0" encoding="utf-8" ?>
@@ -2158,6 +2167,61 @@ def update_bu_config_account_status(soap_url, session_id, bu_config_sf_id, statu
         print(f"Failed to update BU_Config_Refresh__c.accountStatus__c: {str(e)}")
         return False
 
+# Helper function to update BU_Config_Refresh__c.SolutionStatus__c field
+def update_bu_config_solution_status(soap_url, session_id, bu_config_sf_id, status_value):
+    """
+    Update SolutionStatus__c field on BU_Config_Refresh__c record
+    status_value: '处理中', '更新完成', '部分失败'
+    """
+    try:
+        update_xml = f"""<?xml version="1.0" encoding="utf-8" ?>
+<env:Envelope xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xmlns:env="http://schemas.xmlsoap.org/soap/envelope/">
+  <env:Header>
+    <SessionHeader xmlns="urn:partner.soap.sforce.com">
+      <sessionId>{session_id}</sessionId>
+    </SessionHeader>
+  </env:Header>
+  <env:Body>
+    <update xmlns="urn:partner.soap.sforce.com">
+      <sObjects xsi:type="sf:sObject" xmlns:sf="urn:sobject.partner.soap.sforce.com">
+        <sf:type>BU_Config_Refresh__c</sf:type>
+        <sf:Id>{bu_config_sf_id}</sf:Id>
+        <sf:SolutionStatus__c>{html.escape(status_value)}</sf:SolutionStatus__c>
+      </sObjects>
+    </update>
+  </env:Body>
+</env:Envelope>"""
+        
+        headers = {
+            "Content-Type": "text/xml; charset=UTF-8",
+            "SOAPAction": "update",
+            "Connection": "close"
+        }
+        
+        import time
+        for attempt in range(3):
+            try:
+                res = requests.post(soap_url, data=update_xml.encode('utf-8'), headers=headers, timeout=30)
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise e
+                time.sleep(2)
+        log_sfdc_request(soap_url, "POST", headers, update_xml, res.status_code, res.content)
+        
+        if res.status_code == 200:
+            root = ET.fromstring(res.content)
+            for elem in root.iter():
+                if elem.tag.split('}')[-1] == 'success':
+                    return elem.text.lower() == 'true'
+        return False
+    except Exception as e:
+        log_sfdc_request(soap_url, "POST", headers, update_xml, error_message=str(e))
+        print(f"Failed to update BU_Config_Refresh__c.SolutionStatus__c: {str(e)}")
+        return False
+
 # Helper function to execute anonymous Apex code via Tooling REST API
 def execute_apex_anonymous(server_url, session_id, apex_code):
     """
@@ -2224,6 +2288,12 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
                                "bu_province__c": "BU_province__c",
                                "community__c": "Community__c",
                                "region__c": "Region__c"}
+    
+    # Predefined fields to clear for Solution (Solution项目需求)
+    solution_clear_fields = {"bu__c": "BU__c",
+                             "bu_province__c": "BU_Province__c",
+                             "community__c": "Community__c",
+                             "region__c": "Region__c"}
 
 
     sobjects_xml = []
@@ -2239,6 +2309,11 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
             region_c = ""
             prov_name = ""
             
+            lastmonth_bu = ""
+            lastmonth_community = ""
+            lastmonth_region = ""
+            lastmonth_prov = ""
+
             for k_orig, v_orig in r.items():
                 kl = k_orig.lower()
                 if kl == 'bu__c' and v_orig:
@@ -2252,26 +2327,36 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
                         prov_name = str(v_orig.get('Name', v_orig.get('name', '')))
                     else:
                         prov_name = str(v_orig)
+                elif kl == 'bu_lastmonth__c' and v_orig:
+                    lastmonth_bu = str(v_orig)
+                elif kl == 'community_lastmonth__c' and v_orig:
+                    lastmonth_community = str(v_orig)
+                elif kl == 'region_lastmonth__c' and v_orig:
+                    lastmonth_region = str(v_orig)
+                elif kl == 'bu_province_lastmonth__c' and v_orig:
+                    lastmonth_prov = str(v_orig)
             
-            if prov_name:
-                fields_xml.append(f"<sf:BU_province_lastmonth__c>{html.escape(prov_name)}</sf:BU_province_lastmonth__c>")
-            else:
-                fields_to_null.append("BU_province_lastmonth__c")
-                
-            if bu_c:
-                fields_xml.append(f"<sf:BU_lastmonth__c>{html.escape(bu_c)}</sf:BU_lastmonth__c>")
-            else:
-                fields_to_null.append("BU_lastmonth__c")
-                
-            if community_c:
-                fields_xml.append(f"<sf:Community_lastmonth__c>{html.escape(community_c)}</sf:Community_lastmonth__c>")
-            else:
-                fields_to_null.append("Community_lastmonth__c")
-                
-            if region_c:
-                fields_xml.append(f"<sf:Region_lastmonth__c>{html.escape(region_c)}</sf:Region_lastmonth__c>")
-            else:
-                fields_to_null.append("Region_lastmonth__c")
+            # Only map the lastmonth fields if they are currently consistent with the main fields
+            if lastmonth_prov == prov_name and lastmonth_bu == bu_c and lastmonth_community == community_c and lastmonth_region == region_c:
+                if prov_name:
+                    fields_xml.append(f"<sf:BU_province_lastmonth__c>{html.escape(prov_name)}</sf:BU_province_lastmonth__c>")
+                else:
+                    fields_to_null.append("BU_province_lastmonth__c")
+                    
+                if bu_c:
+                    fields_xml.append(f"<sf:BU_lastmonth__c>{html.escape(bu_c)}</sf:BU_lastmonth__c>")
+                else:
+                    fields_to_null.append("BU_lastmonth__c")
+                    
+                if community_c:
+                    fields_xml.append(f"<sf:Community_lastmonth__c>{html.escape(community_c)}</sf:Community_lastmonth__c>")
+                else:
+                    fields_to_null.append("Community_lastmonth__c")
+                    
+                if region_c:
+                    fields_xml.append(f"<sf:Region_lastmonth__c>{html.escape(region_c)}</sf:Region_lastmonth__c>")
+                else:
+                    fields_to_null.append("Region_lastmonth__c")
         
         for k, v in r.items():
             kl = k.lower()
@@ -2294,6 +2379,12 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
             # Skip the custom mapped lastmonth fields to prevent duplicates
             if subtask_key == 'opportunity' and kl in ['bu_province_lastmonth__c', 'bu_lastmonth__c', 'community_lastmonth__c', 'region_lastmonth__c']:
                 continue
+            
+            # For solutionprojectrequirements, we only care about clearing the specific fields, others are ignored and not transmitted
+            if subtask_key == 'solutionprojectrequirements':
+                if kl in solution_clear_fields:
+                    fields_to_null.append(solution_clear_fields[kl])
+                continue # Skip all other fields
             
             # Check if it should be cleared
             if subtask_key == 'user' and kl in user_clear_fields:
@@ -2324,6 +2415,10 @@ def update_sobjects_salesforce_single_batch(soap_url, session_id, object_api_nam
                     fields_to_null.append(orig_name)
         elif subtask_key == 'opportunity':
             for kl, orig_name in opportunity_clear_fields.items():
+                if orig_name not in fields_to_null:
+                    fields_to_null.append(orig_name)
+        elif subtask_key == 'solutionprojectrequirements':
+            for kl, orig_name in solution_clear_fields.items():
                 if orig_name not in fields_to_null:
                     fields_to_null.append(orig_name)
         
@@ -3029,6 +3124,116 @@ def update_subtask():
             update_custom_label(server_url, session_id, 'opportunityCTOM', 'true')
 
 
+        elif session_id and server_url and subtask_key == 'solutionprojectrequirements':
+            soap_url = f"{server_url}/services/Soap/u/58.0"
+            
+            # Update SolutionStatus__c to '处理中'
+            update_bu_config_solution_status(soap_url, session_id, bu_config_id, '处理中')
+            
+            # Prepare records
+            records_to_update = []
+            db_row_map = {}
+            for idx, row in enumerate(backup_rows):
+                row_db_id = row[0]
+                rec_id = row[1]
+                raw_data_str = row[3]
+                try:
+                    record_data = json.loads(raw_data_str)
+                except Exception:
+                    record_data = {}
+                if 'Id' not in record_data and 'id' not in record_data:
+                    record_data['Id'] = rec_id
+                records_to_update.append(record_data)
+                db_row_map[idx] = row_db_id
+            
+            chunk_size = 10
+            max_workers = 1
+            
+            indexed_records = list(enumerate(records_to_update))
+            chunks = [indexed_records[i:i+chunk_size] for i in range(0, len(indexed_records), chunk_size)]
+            
+            pending_updates = []
+            completed_chunks = 0
+            
+            def flush_pending_sol():
+                nonlocal pending_updates
+                if not pending_updates:
+                    return
+                with db_conn() as conn_write:
+                    cursor_write = conn_write.cursor()
+                    for row_db_id, is_success, err_msg in pending_updates:
+                        if is_success:
+                            cursor_write.execute("UPDATE backup_records SET sync_status = 'success', error_message = NULL WHERE id = ?", (row_db_id,))
+                        else:
+                            cursor_write.execute("UPDATE backup_records SET sync_status = 'failed', error_message = ? WHERE id = ?", (err_msg, row_db_id))
+                    
+                    cursor_write.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'success'", (bu_config_id, subtask_key))
+                    sc = cursor_write.fetchone()[0]
+                    cursor_write.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed'", (bu_config_id, subtask_key))
+                    fc = cursor_write.fetchone()[0]
+                    
+                    cursor_write.execute("UPDATE subtasks SET success_count = ?, fail_count = ? WHERE bu_config_id = ? AND key = ?", 
+                                         (sc, fc, bu_config_id, subtask_key))
+                    conn_write.commit()
+                pending_updates = []
+                return sc, fc
+            
+            pause_key = (bu_config_id, subtask_key)
+            PAUSE_CONTROL[pause_key] = {'paused': False}
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_chunk = {}
+                for chunk in chunks:
+                    batch_records = [r for idx, r in chunk]
+                    future = executor.submit(
+                        update_sobjects_salesforce_single_batch, 
+                        soap_url, session_id, object_api_name, batch_records, subtask_key
+                    )
+                    future_to_chunk[future] = chunk
+                
+                for future in as_completed(future_to_chunk):
+                    if PAUSE_CONTROL.get(pause_key, {}).get('paused', False):
+                        with db_conn() as conn_pause:
+                            cursor_pause = conn_pause.cursor()
+                            cursor_pause.execute("UPDATE subtasks SET run_state = 'paused' WHERE bu_config_id = ? AND key = ?", 
+                                               (bu_config_id, subtask_key))
+                            conn_pause.commit()
+                        flush_pending_sol()
+                        
+                        return jsonify({
+                            "success": True,
+                            "paused": True,
+                            "successCount": success_count,
+                            "failCount": fail_count,
+                            "message": f"更新已暂停。成功: {success_count} 条，失败: {fail_count} 条。"
+                        })
+                    
+                    chunk = future_to_chunk[future]
+                    try:
+                        chunk_results = future.result()
+                    except Exception as e:
+                        chunk_results = [{'id': r.get('Id', r.get('id', '')), 'success': False, 'error': str(e)} for idx, r in chunk]
+                    
+                    completed_chunks += 1
+                    
+                    for item_idx, res_info in enumerate(chunk_results):
+                        original_idx = chunk[item_idx][0]
+                        row_db_id = db_row_map.get(original_idx)
+                        if not row_db_id:
+                            continue
+                        is_success = res_info.get('success', False)
+                        err_msg = res_info.get('error', 'Salesforce update failed without error message') if not is_success else None
+                        pending_updates.append((row_db_id, is_success, err_msg))
+                    
+                    if completed_chunks % 5 == 0 or completed_chunks == len(chunks):
+                        result = flush_pending_sol()
+                        if result:
+                            success_count, fail_count = result
+
+            if pause_key in PAUSE_CONTROL:
+                del PAUSE_CONTROL[pause_key]
+
+
         else:
             # Simulation fallback:
             # - We can simulate small delay so progress ticks visually in UI
@@ -3094,6 +3299,13 @@ def update_subtask():
             else:
                 update_bu_config_user_status(soap_url, session_id, bu_config_id, '更新完成')
         
+        # Update BU_Config_Refresh__c.SolutionStatus__c based on final result for solution subtask
+        if session_id and server_url and subtask_key == 'solutionprojectrequirements':
+            soap_url = f"{server_url}/services/Soap/u/58.0"
+            if fail_count > 0:
+                update_bu_config_solution_status(soap_url, session_id, bu_config_id, '部分失败')
+            else:
+                update_bu_config_solution_status(soap_url, session_id, bu_config_id, '更新完成')
 
         # Update BU_Config_Refresh__c.opportunityStatus__c based on final result for opportunity subtask
         if session_id and server_url and subtask_key == 'opportunity':
@@ -3526,6 +3738,71 @@ def retry_subtask():
 
                 update_custom_label(server_url, session_id, 'opportunityCTOM', 'true')
 
+        elif session_id and server_url and subtask_key == 'solutionprojectrequirements':
+            soap_url = f"{server_url}/services/Soap/u/58.0"
+            if all_completed:
+                print(f"All records already completed. Skipping update.")
+            else:
+                update_bu_config_solution_status(soap_url, session_id, bu_config_id, '处理中')
+                
+                records_to_update = []
+                db_row_map = {}
+                for idx, row in enumerate(failed_rows):
+                    row_db_id = row[0]
+                    rec_id = row[1]
+                    raw_data_str = row[3]
+                    try:
+                        record_data = json.loads(raw_data_str)
+                    except:
+                        record_data = {}
+                    if 'Id' not in record_data and 'id' not in record_data:
+                        record_data['Id'] = rec_id
+                    records_to_update.append(record_data)
+                    db_row_map[idx] = row_db_id
+                
+                chunk_size = 10
+                max_workers = 1
+                indexed_records = list(enumerate(records_to_update))
+                chunks = [indexed_records[i:i+chunk_size] for i in range(0, len(indexed_records), chunk_size)]
+                
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_chunk = {}
+                    for chunk in chunks:
+                        batch_records = [r for idx, r in chunk]
+                        future = executor.submit(
+                            update_sobjects_salesforce_single_batch, 
+                            soap_url, session_id, object_api_name, batch_records, subtask_key
+                        )
+                        future_to_chunk[future] = chunk
+                    
+                    for future in as_completed(future_to_chunk):
+                        chunk = future_to_chunk[future]
+                        try:
+                            chunk_results = future.result()
+                        except Exception as e:
+                            chunk_results = [{'id': r.get('Id', r.get('id', '')), 'success': False, 'error': str(e)} for idx, r in chunk]
+                        
+                        with db_conn() as conn_write:
+                            cursor_write = conn_write.cursor()
+                            for item_idx, res_info in enumerate(chunk_results):
+                                original_idx = chunk[item_idx][0]
+                                row_db_id = db_row_map.get(original_idx)
+                                if not row_db_id: continue
+                                is_success = res_info.get('success', False)
+                                err_msg = res_info.get('error', 'Salesforce update failed') if not is_success else None
+                                
+                                if is_success:
+                                    cursor_write.execute("UPDATE backup_records SET sync_status = 'success', error_message = NULL WHERE id = ?", (row_db_id,))
+                                else:
+                                    cursor_write.execute("UPDATE backup_records SET sync_status = 'failed', error_message = ? WHERE id = ?", (err_msg, row_db_id))
+                            
+                            cursor_write.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'success'", (bu_config_id, subtask_key))
+                            success_count = cursor_write.fetchone()[0]
+                            cursor_write.execute("SELECT COUNT(*) FROM backup_records WHERE bu_config_id = ? AND subtask_key = ? AND sync_status = 'failed'", (bu_config_id, subtask_key))
+                            fail_count = cursor_write.fetchone()[0]
+                            cursor_write.execute("UPDATE subtasks SET success_count = ?, fail_count = ? WHERE bu_config_id = ? AND key = ?", 
+                                                (success_count, fail_count, bu_config_id, subtask_key))
+                            conn_write.commit()
         
         else:
             # Reopen connection for writing simulation retry
@@ -3568,6 +3845,14 @@ def retry_subtask():
             else:
                 update_bu_config_user_status(soap_url, session_id, bu_config_id, '更新完成')
         
+        # Update BU_Config_Refresh__c.SolutionStatus__c based on retry result for solution subtask
+        if session_id and server_url and subtask_key == 'solutionprojectrequirements':
+            soap_url = f"{server_url}/services/Soap/u/58.0"
+            if fail_count > 0:
+                update_bu_config_solution_status(soap_url, session_id, bu_config_id, '部分失败')
+            else:
+                update_bu_config_solution_status(soap_url, session_id, bu_config_id, '更新完成')
+
         # Update BU_Config_Refresh__c.opportunityStatus__c based on retry result for opportunity subtask
         if session_id and server_url and subtask_key == 'opportunity':
             soap_url = f"{server_url}/services/Soap/u/58.0"
